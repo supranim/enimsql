@@ -17,10 +17,7 @@ const ENIMSQL_GET_ALL_EXCEPT_ONE = "SELECT * FROM $1 WHERE $2 != $3"
 proc connection(): DbConn =
     ## Opens a database connection. Raises EDb if the connection could not be established.
     ## Clients can also use Postgres keyword/value connection strings to connect
-    open(os.getEnv("DB_HOST"),
-        os.getEnv("DB_USER"),
-        os.getEnv("DB_PASS"),
-        os.getEnv("DB_NAME"))
+    open(getEnv("DB_HOST"), getEnv("DB_USER"), getEnv("DB_PASS"), getEnv("DB_NAME"))
 
 proc db(): DbConn =
     ## Retrieve database connection instance
