@@ -96,6 +96,7 @@ type
 
 From a model definition, Enimsql deduces SQL queries to create tables, insert, select, update, and delete rows. Enimsql converts Nim objects to rows, their fields to columns, and their types to SQL types and vice versa.
 ```python
+import enimsql/model
 
 # To create relations between models, define fields subtyped from Model
 # To add a UNIQUE constraint to a field, use {.unique.} pragma.
@@ -114,6 +115,8 @@ type
 You can extend your models with custom procedures for creating stronger fluent operations.
 
 ```python
+import enimsql
+
 type
     User = ref object of Model
         email*: string
