@@ -110,7 +110,28 @@ type
 
 ```
 
+## Models & Procedures
+You can extend your models with custom procedures for creating stronger fluent operations.
 
+```python
+type
+    User = ref object of Model
+        email*: string
+        password*: string
+        confirmed: bool
+
+proc getByEmail*[T: User](self: T, emailInput:string): seq =
+    ## A short hand procedure for retrieving an user by its email account
+    return self.where("email", emailInput).first().exec()
+
+proc getInactive*[T: User](self: T): seq =
+    ## A short hand procedure for retrieving all email addresses from unconfirmed users
+    return self.select("email").where("confirmed", false).exec()
+
+# Calling custom Model procs will return a sequence with available results or none.
+var users = User().getByEmail("test@example.com")
+var inactiveUsers = User().getInactive()
+```
 
 # Roadmap
 ...
