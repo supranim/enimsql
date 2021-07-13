@@ -58,7 +58,7 @@ Article().insert(%*{
 
 ```
 
-For inserting multiple rows or even huge amount of data we are going to use `insert()` procedure, making use of `COPY` statement which, apparently is much faster than `INSERT`.
+For inserting multiple rows or even huge amount of data we are going to use `insertBulk()` procedure, making use of `COPY` statement which, apparently is much faster than `INSERT`.
 
 ```python
 Article().insertBulk(%*[
@@ -111,7 +111,15 @@ type
 
 ```
 
-## Models & Procedures
+### Model - Constraints
+Using Nim's pragmas you can set the column constraints using common constraints like `PRIMARY KEY`, `UNIQUE`, `NULL`, `NOT NULL`, `CHECK`, `FOREIGN_KEY`, `DEFAULT` or `CREATE_INDEX` or custom ones.
+
+@TODO
+
+### Model - Field types
+@TODO
+
+### Model - Custom Procedures
 You can extend your models with custom procedures for creating stronger fluent operations.
 
 ```python
@@ -138,6 +146,12 @@ var inactiveUsers = User().getInactive()
 
 # Roadmap
 ...
+
+**What's Nim?**
+_Nim is a statically typed compiled systems programming language. It combines successful concepts from mature languages like Python, Ada and Modula. [Find out more about Nim, and Nimble](https://nim-lang.org/)_
+
+**Why Nim?**
+Performance, fast compilation and C-like freedom. I want to keep code clean, readable, concise, and close to my intention. Also a very good language to learn in 2021.
 
 ## License
 Enimsql is an open source library released under BSD-3 Clause License.
