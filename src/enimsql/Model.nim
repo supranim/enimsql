@@ -18,14 +18,15 @@ template unique* {.pragma.}
     ## Mark field as unique.
 
 template fk*(val: typed) {.pragma.}
-    ## Mark ``int`` field as foreign key. Foreign keys always references the field ``id`` of ``val``. ``val`` should be a Model.
+    ## Mark ``int`` field as foreign key.
+    ## Foreign keys always references the field ``id`` of ``val``. ``val`` should be a Model.
 
 template onDelete*(val: string) {.pragma.}
     ## Add ``ON DELETE {val}`` constraint to the column.
 
 
 # Define Base Model object
-type BaseModel* = ref object of RootObj
+type Model* = ref object of RootObj
     id* {.pk, ro.}: int64
     sql*: string
     TableName*: string
