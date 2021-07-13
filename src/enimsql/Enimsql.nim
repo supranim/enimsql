@@ -37,10 +37,18 @@ proc db(): DbConn =
     return connection()
 
 proc table[T: Model](self: T): string =
-    ## Procedure for retrieving the name of the table based on its model
-    ## If the model name is camel case then the table name
-    ## is converted to lowercase separated by underscore
-    return self.type.name.toLowerAscii
+    ## Retrieve the name of the table based on Model name, converted to lowercase.
+    ## Gramatically, the name of the model must be set in a singular form
+    ## Enimsql will automatically set the database table names in plural form.
+    ## Model names ending in "s", "es", "sh", "ch", "x" or "z" will append to "es"
+    var esSuffix = @["s", "es", "sh", "ch", "x", "z"]
+    var modelName = self.type.name.toLowerAscii
+    for esSfx in esSuffix:
+        if modelName.endsWith(esSfx):
+            modelName = "$1es" % [modelName]
+            return modelName
+
+    return "$1s" % [modelName]
 
 proc execQuery(self: Model): seq =
     ## SQL Query for retrieving all available records from a specific table
