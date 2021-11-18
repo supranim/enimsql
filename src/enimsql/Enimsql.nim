@@ -30,13 +30,12 @@ const ENIMSQL_DELETE = "DELETE "
 const ENIMSQL_ORDERBY = "ORDER BY $1"
 
 const CREATE_TABLE = "CREATE TABLE $1 ($2)"
-const DROP_TABLE = "DROP TABLE $1 IF EXIST"
 
 var DBInstance: DbConn
 
 type
     Document = object
-        results: Table[string, string]
+        results: JsonNode
 
 proc connection(): DbConn =
     ## Opens a database connection.
@@ -64,36 +63,6 @@ proc table[T: Model](self: T): string =
             return modelName
     return "$1s" % [modelName]
 
-proc execQuery(self: Model): seq[Table[string, string]] =
-    ## SQL Query for retrieving all available records from a specific table
-    ## The actual SQL Query executer that grabs all records related to given SQL query
-    ## and store in a sequence table as collection.
-    ## If no results found a DbError will raise in console and return an empty collection
-    var
-        columns: db_postgres.DbColumns
-        collection: seq[Table[string, string]]
-    DBInstance = db()
-
-    try:
-        for row in instantRows(DBInstance, columns, sql(self.sql)):
-            # stack.length = columns.len
-            var items = initTable[string, string]()
-            for key, col in columns:
-                if row[key].len == 0: continue
-                items[col.name] = row[key]
-            collection.add(items)
-    except DbError as error:
-        echo error.msg
-
-    echo collection
-    return collection
-
-proc exec*(self: Model): seq =
-    ## Procedure for executing the current SQL
-    var results = self.execQuery()
-    DBInstance.close()
-    return results
-
 macro getFromDocument(key: static string): untyped = 
     nnkStmtList.newTree(
         nnkReturnStmt.newTree(
@@ -107,11 +76,50 @@ macro getFromDocument(key: static string): untyped =
         )
     )
 
-proc get*[T: Document](doc: var T): seq[Table[string, string]] =
-    return doc.results
+proc get*[T: Document](doc: var T): Document =
+    ## Retrieve entire Table results from Document
+    return doc
 
-proc get*[T: Document](doc: var T, key: string): string = 
-    key.getFromDocument()
+proc get*[T: Document](doc: var T, debug: bool): string =
+    ## Retrieve Document results stringified via JSON pretty procedure.
+    pretty(doc.results)
+
+proc first*[T: Document](doc: T): JsonNode =
+    ## Retrieve first row from Document
+    doc.results[0]
+
+proc last*[T: Document](doc: T): JsonNode =
+    ## Retrieve last row from Document
+    doc.results[^1]
+
+proc execQuery(self: Model): Document =
+    ## SQL Query for retrieving all available records from a specific table
+    ## The actual SQL Query executer that grabs all records related to given SQL query
+    ## and store in a sequence table as collection.
+    ## If no results found a DbError will raise in console and return an empty collection
+    var doc = Document()
+    doc.results = newJArray()
+    var columns: db_postgres.DbColumns
+    DBInstance = db()
+    try:
+        for row in instantRows(DBInstance, columns, sql(self.sql)):
+            var rows = newJObject()
+            for key, col in columns:
+                rows[col.name] = %* row[key]
+                # rows[col.name] = %* {
+                #     "value": row[key],
+                #     "type": col.typ.name
+                # }
+            doc.results.add rows
+    except DbError as error:
+        echo error.msg
+    return doc
+
+proc exec*(self: Model): Document =
+    ## Procedure for executing the current SQL
+    var results = self.execQuery()
+    DBInstance.close()
+    return results
 
 proc createTable*[T: Model](self: T): bool =
     ## Create a new table based on selected Model
@@ -123,7 +131,7 @@ proc createTable*[T: Model](self: T): bool =
 
 proc dropTable*[T: Model](self: T): bool =
     ## Drop a table if exists based on selected Model
-    self.sql = DROP_TABLE % [self.TableName]
+    self.sql = "DROP TABLE $1 IF EXIST" % [self.TableName]
     DBInstance = db()
     DBInstance.sql(self.sql)
     DBInstance.close()
@@ -132,16 +140,15 @@ proc dropTable*[T: Model](self: T): bool =
 proc select*[T: Model](self: T, columns: varargs[string]): Model =
     ## Procedure for declaring an 'SELECT' SQL statement.
     ## Accepts one or many columns via varargs to be used for selection
-    var cols = if columns.len == 0: "*" else: strutils.join(columns, ",")
+    var cols = if columns.len == 0: "*" else: columns.join(",")
     self.TableName = self.table()
-    # if not selectAll:
     self.sql = ENIMSQL_SELECT % [cols]
-    # else:
-    #     self.sql = ENIMSQL_SELECT_ALL % [cols, self.TableName]
     return self
 
-proc selectAll*[T: Model](self: T, columns: varargs[string]): Model =
-    return self.select()
+proc selectAll*[T: Model](self: T): Model =
+    self.TableName = self.table()
+    self.sql = ENIMSQL_SELECT_ALL % ["*", self.TableName]
+    return self
 
 proc where*[T: Model](self: T, colValue: string, expectValue: string, operator: string="="): Model =
     ## Procedure for creating an 'WHERE' SQL statement.
