@@ -1,8 +1,8 @@
-# Enimsql (WIP)
-Open Source PostgreSQL ORM for poets 👌 Written in Nim.<br>
-Inspired by Illuminate Eloquent & the romanian poet, Mihai Eminescu 🤟
+<p align="center"><img src="/.github/enimsql.png" width="290px"><br>
+<strong>Open Source PostgreSQL ORM for poets 👌 Written in Nim.</strong>,<br>Inspired by Illuminate Eloquent & the romanian poet, Mihai Eminescu 🤟
+</p>
 
-**Currently, Enimsql is more like a proof of concept. There are many things to implement.**
+_Work in progress_
 
 ```python
 import enimsql, times, json
