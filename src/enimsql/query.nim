@@ -1,6 +1,8 @@
-# Enimsql is an object-driven ORM for PostgreSQL.
-# Built with Nim's powerful Macros.
-# 
+# A simple ORM for poets
+#
+# (c) 2021 Enimsql is released under MIT License
+#          George Lemon | Made by Humans from OpenPeep
+#          https://supranim.com   |    https://github.com/supranim/enimsql
 
 import std/tables
 import std/macros except name
@@ -10,124 +12,42 @@ import std/json
 
 from std/strutils import `%`, indent, join, toLowerAscii, endsWith
 
-type
-    Comparators* = enum
-        EQ = "="
-        GT = ">"
-        LT = "<"
-        GTE = ">="
-        LTE = "<="
-        NEQ = "<>"
-        BETWEEN = "BETWEEN"
-        LIKE = "LIKE"
-        IN = "IN"
+include ./meta
 
-    Conditionals* = enum
-        AND = "AND"
-        OR = "OR"
-        NOT = "NOT"
+template `a%`*(str: string): untyped =
+    ## Finds any values that start with given `str`
+    var valueLike = "$1%" % [str]
+    valueLike
 
-    Order* = enum
-        ASC = "ASC"
-        DESC = "DESC"
+template `%a`*(str: string): untyped =
+    ## Finds any values that end with given `str`
+    var valueLike  = "%$1" % [str]
+    valueLike
 
-    StatementType = enum
-        SelectStmt = "SELECT"
-        DeleteStmt = "DELETE"
-        UpdateStmt = "UPDATE"
-        UpdateAllStmt = "UPDATE"
+template `%a%`*(str: string): untyped =
+    ## Finds any values that have given `str` in any position
+    var valueLike  = "%$1%" % [str]
+    valueLike
 
-    CompFilter* = tuple[colName: string, op: Comparators, value: string]
-    KeyValueTuple* = tuple[colName, newValue: string]
+template `-a%`*(str: string): untyped =
+    ## Finds any values that contains given `str` in the second position.
+    var valueLike  = "_$1%" % [str]
+    valueLike
 
-    Syntax = ref object
-        case stmtType: StatementType
-            of DeleteStmt: discard
-            of SelectStmt:
-                selectStmt: seq[string]
-            of UpdateStmt, UpdateAllStmt:
-                updateSetStmt: seq[KeyValueTuple]
-
-        whereStmt: seq[CompFilter]
-        countWhere: int
-        fromStmt: string
-
-    AbstractModel* = object of RootObj
-        metaTableName: string
-        metaModelName: string
-        sql: Syntax
-
-    ModelColumns = Table[string, string]
-    
-    Models = object
-        storage: Table[string, ModelColumns]
-
-    EnimsqlError = ref object of CatchableError
-    DatabaseDefect = object of Defect
-
-var Model* = Models()
-var modelsIdent {.compileTime.}: seq[string]
-
-# dumpAstGen:
-#     type
-#         MyModel* = ref object of AbstractModel
-#             test*: string
-#             aha*: ok
-
-template checkObjectIntegrity(modelIdent: typedesc[ref object]) =
-    static:
-        if $modelIdent notin modelsIdent:
-            raise EnimsqlError(msg: "Unknown objects cannot be used as models.")
-
-template checkModelColumns(modelIdent: string, columns:varargs[string]) =
-    let modelStruct = Model.storage[modelIdent]
-    for colId in columns:
-        if not modelStruct.hasKey(colId):
-            raise EnimsqlError(msg: "Unknown column name \"$1\" for model \"$2\"" % [colId, modelIdent])
-
-template checkModelColumns(modelIdent: string, columns:varargs[KeyValueTuple]) =
-    let modelStruct = Model.storage[modelIdent]
-    for col in columns:
-        if not modelStruct.hasKey(col.colName):
-            raise EnimsqlError(msg: "Unknown column name \"$1\" for model \"$2\"" % [col.colName, modelIdent])
-
-template checkDuplicates(colName, modelName: string, refCol: var seq[string]) =
-    if colName in refCol:
-        raise newException(DatabaseDefect,
-            "Duplicated column name \"$1\" for \"$2\" model." % [colName, modelName])
-
-proc getModelName(id: string): string =
-    ## Retrieve the name of the table based on Model's name,
-    ## converted to lowercase. Gramatically, the name of the
-    ## model must be set in a singular form.
-    ## Enimsql will automatically set the database table
-    ## names in plural form. Names that ends with
-    ## "s", "es", "sh", "ch", "x" or "z" will append to "es"
-    var esSuffix = @["s", "es", "sh", "ch", "x", "z"]
-    var modelName = id.toLowerAscii()
-    for esSfx in esSuffix:
-        if modelName.endsWith(esSfx):
-            modelName = "$1es" % [modelName]
-            return modelName
-    result = "$1s" % [modelName]
-
-# proc get*[M: typedesc[object]](model: M, id: string): string =
-#     result = Model.storage[id]
-
-proc initTable[M](model: typedesc[ref M], stmtType: StatementType): ref M =
-    ## Initialize a ``ref object`` for current ``Model``
-    result = new model
-    result.sql = new Syntax
-    result.sql.stmtType = stmtType
-    result.metaModelName = $model
-    result.metaTableName = getModelName($model)
+template `a%b`*(startStr, endStr: string): untyped =
+    ## Finds any values that start with "a" and ends with "o"
+    var valueLike  = "$1%$2" % [startStr, endStr]
+    valueLike
 
 proc exists[M](model: ref M, id: string): ref M =
     ## Test the existence of any record in a subquery
     static: checkObjectIntegrity(model)
 
 proc select*[M](model: typedesc[ref M], columns: varargs[string]): ref M =
-    ## Select specific columns from current model
+    ## Create a `SELECT` statement returning only rows with specified columns
+    runnableExamples:
+        User.select("username", "email_address").exec()
+
     static: checkObjectIntegrity(model)
     if columns.len != 0:
         checkModelColumns($model, columns)
@@ -140,8 +60,13 @@ proc select*[M](model: typedesc[ref M], columns: varargs[string]): ref M =
             result.sql.selectStmt.add(col)
 
 proc update*[M](model: typedesc[ref M], cols: varargs[KeyValueTuple]): ref M =
-    ## Safe procedure for updating records in a ``Model`` followed by a ``WHERE`` statement.
-    ## For updating all records use ``updateAll`` proc.
+    ## Create an `UPDATE` statement. Once executed,
+    ## returns either `true` or `false`.
+    ##
+    ## This is a safe proc for updating records in a `Model`, and
+    ## requires a `WHERE` statement.
+    ##
+    ## For updating all records use `updateAll` proc.
     static: checkObjectIntegrity(model)
     if cols.len != 0:
         checkModelColumns($model, cols)
@@ -152,7 +77,7 @@ proc update*[M](model: typedesc[ref M], cols: varargs[KeyValueTuple]): ref M =
         result.sql.updateSetStmt.add(col)
 
 proc updateAll*[M](model: typedesc[ref M], cols: varargs[KeyValueTuple]): ref M =
-    ## Update all records in a ``Model`` with given columns and values.
+    ## Update all records in a `Model` with given columns and values.
     static: checkObjectIntegrity(model)
     if cols.len != 0:
         checkModelColumns($model, cols)
@@ -169,25 +94,37 @@ proc delete*[M](model: typedesc[ref M]): ref M =
     result = model.initTable(DeleteStmt)
 
 proc where*[M](model: ref M, filters: varargs[CompFilter]): ref M =
-    ## Handle ``WHERE`` statements with filtering support.
-    ## All ``Comparators`` are supported.
+    ## Handle `WHERE` statements with filtering support.
+    ## All `Comparators` are supported.
     for filter in filters:
         model.sql.whereStmt.add filter
         inc model.sql.countWhere
     result = model
 
 proc whereIn*[M](model: ref M, column: string, values:openarray[string]): ref M =
-    ## https://www.w3schools.com/sql/sql_in.asp
-    ## Handle ``WHERE`` IN operator
+    ## Handle a `WHERE` statement followed by an `IN` operator
     for value in values:
         model.sql.whereIn.add value
     result = model
 
 proc whereNotIn*[M](model: ref M, column: string, values:openarray[string]): ref M =
-    ## https://www.w3schools.com/sql/sql_in.asp
+    ## Handle a `WHERE` statement followed by an `NOT` operator
     ## TODO validate col name
     for value in values:
         model.sql.whereNotIn.add value
+    result = model
+
+proc whereLike*[M](model: ref M, column: string, valueLike: string): ref M =
+    ## `a%`       Finds any values that start with "a"
+    ## `%a`       Finds any values that end with "a"
+    ## `%or%`     Finds any values that have "or" in any position
+    ## `_r%`      Finds any values that have "r" in the second position
+    ## `a_%`      Finds any values that start with "a" and are at least 2 characters in length
+    ## `a__%`     Finds any values that start with "a" and are at least 3 characters in length
+    ## `a%o`      Finds any values that start with "a" and ends with "o"
+    checkModelColumns(model.metaModelName, column)
+    model.sql.whereLikeStmt.add (column, valueLike)
+    inc model.sql.countWhere
     result = model
 
 proc exec*[M](model: ref M): string =
@@ -212,17 +149,24 @@ proc exec*[M](model: ref M): string =
         for i in 0 .. updateStmtLen:
             add syntax, indent(model.sql.updateSetStmt[i].colName, 1)
             add syntax, indent($EQ, 1)
-            add syntax, indent("'" & model.sql.updateSetStmt[i].newValue & "'", 1)
+            add syntax, indent("'" & model.sql.updateSetStmt[i].colValue & "'", 1)
             if i != updateStmtLen:
                 add syntax, ","
+    else: discard
 
     if model.sql.whereStmt.len != 0:
-        # if model.sql.countWhere == 1:
-        add syntax, indent("WHERE", 1)
+        add syntax, indent($WhereStmt, 1)
         for whereStmt in model.sql.whereStmt:
             add syntax, indent(whereStmt.colName, 1)
             add syntax, indent($whereStmt.op, 1)
             add syntax, indent("'" & whereStmt.value & "'", 1)
+            if model.sql.countWhere > 1:
+                add syntax, indent($AND, 1)
+            dec model.sql.countWhere
+    elif model.sql.whereLikeStmt.len != 0:
+        add syntax, indent($WhereStmt, 1)
+        for whereLike in model.sql.whereLikeStmt:
+            add syntax, indent($WhereLikeStmt % [whereLike.colName, whereLike.valueLike], 1)
             if model.sql.countWhere > 1:
                 add syntax, indent($AND, 1)
             dec model.sql.countWhere
@@ -231,10 +175,11 @@ proc exec*[M](model: ref M): string =
             raise newException(DatabaseDefect,
                 "Missing \"WHERE\" statement. Use `updateAll` procedure for updating all records in the table.")
     echo syntax
-    # result = $(toJson(model))
+    result = $(toJson(model))
+    model.sql.countWhere = 0
 
 macro model*(modelId: static string, fields: untyped) =
-    ## Creates a new Model and store in the ``ModelRepository`` table
+    ## Creates a new Model and store in the `ModelRepository` table
     if modelId in modelsIdent:
         raise EnimsqlError(msg: "A model with name \"$1\" already exists." % [modelId])
     fields.expectKind nnkStmtList
