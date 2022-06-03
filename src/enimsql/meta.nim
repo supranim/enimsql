@@ -77,7 +77,7 @@ template checkModelColumns(modelIdent: string, columns:varargs[KeyValueTuple]) =
         if not modelStruct.hasKey(col.colName):
             raise EnimsqlError(msg: "Unknown column name \"$1\" for model \"$2\"" % [col.colName, modelIdent])
 
-template checkDuplicates(colName, modelName: string, refCol: var seq[string]) =
+template checkDuplicates(colName, modelName: string, refCol: seq[string]) =
     if colName in refCol:
         raise newException(DatabaseDefect,
             "Duplicated column name \"$1\" for \"$2\" model." % [colName, modelName])

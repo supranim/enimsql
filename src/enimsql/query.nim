@@ -122,10 +122,10 @@ proc whereLike*[M](model: ref M, column: string, valueLike: string): ref M =
     ## `a_%`      Finds any values that start with "a" and are at least 2 characters in length
     ## `a__%`     Finds any values that start with "a" and are at least 3 characters in length
     ## `a%o`      Finds any values that start with "a" and ends with "o"
-    checkModelColumns(model.metaModelName, column)
-    model.sql.whereLikeStmt.add (column, valueLike)
-    inc model.sql.countWhere
     result = model
+    checkModelColumns(result.metaModelName, column)
+    result.sql.whereLikeStmt.add (column, valueLike)
+    inc result.sql.countWhere
 
 proc exec*[M](model: ref M): string =
     ## Execute the current SQL statement
@@ -175,78 +175,7 @@ proc exec*[M](model: ref M): string =
             raise newException(DatabaseDefect,
                 "Missing \"WHERE\" statement. Use `updateAll` procedure for updating all records in the table.")
     echo syntax
-    result = $(toJson(model))
+    # result = $(toJson(model))
     model.sql.countWhere = 0
 
-macro model*(modelId: static string, fields: untyped) =
-    ## Creates a new Model and store in the `ModelRepository` table
-    if modelId in modelsIdent:
-        raise EnimsqlError(msg: "A model with name \"$1\" already exists." % [modelId])
-    fields.expectKind nnkStmtList
-    var metaCols: ModelColumns
-    var colFields = nnkRecList.newTree()
-    for field in fields:
-        if field.kind == nnkCall:
-            # Handle private fields
-            if field[0].kind == nnkIdent:
-                field[1].expectKind nnkStmtList
-                let fieldId = field[0].strVal
-                let fieldType = field[1][0].strVal
-                # echo fieldId & " " & fieldType
-                metaCols[fieldId] = fieldType
-                colFields.add(
-                    nnkIdentDefs.newTree(
-                        nnkPostfix.newTree(
-                            ident "*",
-                            ident fieldId
-                        ),
-                        ident fieldType,
-                        newEmptyNode()
-                    )
-                )
-
-            elif field[0].kind == nnkPragmaExpr:
-                let fieldId = field[0][0].strVal
-                let fieldType = field[1][0].strVal
-                let fieldPragmas = field[0][1]
-                for fieldPragma in fieldPragmas:
-                    echo fieldPragma.strVal
-
-                # echo fieldId & " " & fieldType
-                metaCols[fieldId] = fieldType
-                colFields.add(
-                    nnkIdentDefs.newTree(
-                        nnkPostfix.newTree(
-                            ident "*",
-                            ident fieldId
-                        ),
-                        ident fieldType,
-                        newEmptyNode()
-                    )
-                )
-
-    modelsIdent.add(modelId)
-    result = newStmtList()
-    result.add(
-        nnkTypeSection.newTree(
-            nnkTypeDef.newTree(
-                nnkPostfix.newTree(
-                    ident "*",
-                    ident modelId
-                ),
-                newEmptyNode(),
-                nnkRefTy.newTree(
-                    nnkObjectTy.newTree(
-                        newEmptyNode(),
-                        nnkOfInherit.newTree(
-                            ident "AbstractModel"
-                        ),
-                        colFields
-                    )
-                )
-            )
-        )
-    )
-
-    result.add quote do:
-        Model.storage[`modelId`] = `metaCols`
+include ./model
