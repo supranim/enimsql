@@ -2,8 +2,8 @@
 
 version       = "0.1.0"
 author        = "George Lemon"
-description   = "Awesome PostgreSQL ORM inspired by Illuminate Eloquent and the romanian poet, Mihai Eminescu"
-license       = "BSD-3-Clause"
+description   = "A simple ORM for poets"
+license       = "MIT"
 srcDir        = "src"
 
 
