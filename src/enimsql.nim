@@ -1,2 +1,2 @@
-import enimsql/Enimsql
-export Enimsql
+import enimsql/query
+export query
