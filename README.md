@@ -26,10 +26,14 @@ model "User":
     updated_at: DateTime
 ```
 
-Create your first query with Enimsql
+## Queries
+Before executing queries you must import your model
 ```nim
 import ./model/user
+```
 
+#### Select & Where
+```
 # Create a simple query selecting all columns
 # SELECT * FROM users WHERE email = 'john.doe@example.com'
 let users = waitFor User.select().where(("email", EQ, "john.doe@example.com")).exec()
@@ -37,10 +41,29 @@ let users = waitFor User.select().where(("email", EQ, "john.doe@example.com")).e
 # Create a query and select only `name`, and `email`
 # SELECT name, email FROM users WHERE email <> 'john.doe@example.com'
 let users = waitFor User.select("name", "email")
-                        .where(("email", NEQ, "john.doe@examples.com"))
+                        .where(("email", NEQ, "john.doe@example.com"))
                         .exec()
-
 ```
+
+#### Update
+Enimsql provides safe procedures for updating records. `update`, which requires to be followed by a `where` statement, and `updateAll`,
+which updates all records in a table for given `key`, `value`.
+
+```nim 
+# UPDATE users SET updated_at = 12345 WHERE email = 'john.doe@example.com'
+let updateStatus = await User.update("updated_at", now())
+                             .where(("email", EQ, "john.doe@example.com"))
+                             .exec()
+if updateStatus:
+    echo "Your profile has been successfully updated"
+else:
+    echo "Could not update your profile, try again"
+
+# Example using `updateAll` for updating all records
+# UPDATE users SET updated_at = 12345
+let updateStatus = await User.updateAll(("updated_at", now())).exec()
+```
+
 
 ## Collection Results
 
