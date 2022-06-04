@@ -33,7 +33,7 @@ import ./model/user
 ```
 
 #### Select & Where
-```
+```nim
 # Create a simple query selecting all columns
 # SELECT * FROM users WHERE email = 'john.doe@example.com'
 let users = waitFor User.select().where(("email", EQ, "john.doe@example.com")).exec()
