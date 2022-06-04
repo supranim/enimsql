@@ -10,7 +10,7 @@ import std/macros except name
 import std/jsonutils
 import std/json
 
-from std/strutils import `%`, indent, join, toLowerAscii, endsWith
+from std/strutils import `%`, indent, join, toLowerAscii, endsWith, escape
 
 include ./meta
 
@@ -149,7 +149,7 @@ proc exec*[M](model: ref M): string =
         for i in 0 .. updateStmtLen:
             add syntax, indent(model.sql.updateSetStmt[i].colName, 1)
             add syntax, indent($EQ, 1)
-            add syntax, indent("'" & model.sql.updateSetStmt[i].colValue & "'", 1)
+            add syntax, indent(escapeValue model.sql.updateSetStmt[i].colValue, 1)
             if i != updateStmtLen:
                 add syntax, ","
     else: discard
@@ -159,7 +159,7 @@ proc exec*[M](model: ref M): string =
         for whereStmt in model.sql.whereStmt:
             add syntax, indent(whereStmt.colName, 1)
             add syntax, indent($whereStmt.op, 1)
-            add syntax, indent("'" & whereStmt.value & "'", 1)
+            add syntax, indent(escapeValue whereStmt.value, 1)
             if model.sql.countWhere > 1:
                 add syntax, indent($AND, 1)
             dec model.sql.countWhere

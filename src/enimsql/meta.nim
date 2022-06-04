@@ -107,3 +107,6 @@ proc initTable[M](model: typedesc[ref M], stmtType: StatementType): ref M =
     result.sql.stmtType = stmtType
     result.metaModelName = $model
     result.metaTableName = getModelName($model)
+
+proc escapeValue(str: string): string {.inline.} =
+    result = escape(str, prefix = "'", suffix = "'")
