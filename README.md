@@ -1,9 +1,8 @@
 <p align="center">
     <img src="https://raw.githubusercontent.com/supranim/enimsql/main/.github/supranim-enimsql.png" height="65px" alt="Supranim Rate Limiter"><br>
-    A simple ORM for poets<br>Work in progress
+    (WIP) A simple ORM for poets<br>Provides a safe & fluent interface for writing SQL queries.
 </p>
 
-Enimsql provides a fluent interface
 ## Key features
 - [x] Fluent Interface (Method chaining)
 - [x] Powered by Nim's Macros System 👑
@@ -23,13 +22,55 @@ export enimsql
 model "User":
     name: string
     email: string
+    country: string
+    city: string
     password: string
     created_at: DateTime
     updated_at: DateTime
 ```
 
 ## Queries
-Before executing queries you must import your model
+- Where Clauses
+
+### Where Clause(s) 
+You may use the query builder's `where` proc to add `WHERE` clauses to the query.
+The most basic call to the `where` proc requires a `varargs` of `KeyOperatorValue` tuple with three arguments.
+1. The first argument is the name of the column.
+2. The second argument is an operator, which can be any of the database's supported operators.
+3. The third argument is the value to compare against the column's value.
+```nim
+User.select().where(("email", EQ, "john.doe@example.com"))
+```
+
+When chaining together calls to the query builder's `where` method, the `WHERE` clauses will be joined together using the `AND`
+operator. Alternatively, since `where` proc accepts a `varargs` of `KeyOperatorValue` tuple, you can call `where` proc once providing `KeyOperatorValue` tuple multiple times.
+```nim
+User.select().where(
+    ("email", NEQ, "john.doe@example.com"),
+    ("city", EQ, "Milan")
+)
+```
+
+However, you may use the `orWhere` proc to join a clause to the query using the `OR` operator.
+```nim
+User.select().where(
+                ("email", NEQ, "john.doe@example.com"),
+                ("city", EQ, "Milan"))
+             .orWhere(
+                ("email", NEQ, "john.doe@example.com"),
+                ("city", EQ "Torino"))
+```
+
+_The example above will produce the following SQL_
+```sql
+SELECT * FROM users
+         WHERE
+            email <> 'john.doe@example.com' AND city = 'Milan'
+            OR (
+                email <> 'john.doe@example.com' AND city = 'Torino'
+            )
+```
+
 ```nim
 import ./model/user
 ```
