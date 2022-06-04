@@ -9,6 +9,7 @@ Enimsql provides a fluent interface
 - [x] Powered by Nim's Macros System 👑
 - [x] Async Pool with [Treeform's PG library](https://github.com/treeform/pg)
 - [x] Built-in Validation using String-based Filters
+- [x] Pluralize Model names for SQLs
 
 ## Examples
 
@@ -16,6 +17,7 @@ Create a new model using macros:
 ```nim
 import std/times
 import enimsql
+
 export enimsql
 
 model "User":
@@ -36,13 +38,13 @@ import ./model/user
 ```nim
 # Create a simple query selecting all columns
 # SELECT * FROM users WHERE email = 'john.doe@example.com'
-let users = waitFor User.select().where(("email", EQ, "john.doe@example.com")).exec()
+let users = await User.select().where(("email", EQ, "john.doe@example.com")).exec()
 
 # Create a query and select only `name`, and `email`
 # SELECT name, email FROM users WHERE email <> 'john.doe@example.com'
-let users = waitFor User.select("name", "email")
-                        .where(("email", NEQ, "john.doe@example.com"))
-                        .exec()
+let users = await User.select("name", "email")
+                      .where(("email", NEQ, "john.doe@example.com"))
+                      .exec()
 ```
 
 #### Update
@@ -51,7 +53,7 @@ which updates all records in a table for given `key`, `value`.
 
 ```nim 
 # UPDATE users SET updated_at = 12345 WHERE email = 'john.doe@example.com'
-let updateStatus = await User.update("updated_at", now())
+let updateStatus = await User.update(("updated_at", now()))
                              .where(("email", EQ, "john.doe@example.com"))
                              .exec()
 if updateStatus:
@@ -64,10 +66,8 @@ else:
 let updateStatus = await User.updateAll(("updated_at", now())).exec()
 ```
 
-
 ## Collection Results
-
-Once executed will return a Collection `Table` containing `User` objects representation of each row.
+Enimsql returns results wrapped in a Collection `Table` that contains `Model` objects representation of each row.
 
 ```nim
 if users.hasResults():
