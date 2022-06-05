@@ -26,8 +26,10 @@ type
         UpdateAllStmt = "UPDATE"
         WhereStmt = "WHERE"
         WhereLikeStmt = "$1 LIKE '$2'"
+        IncrementStmt = "$1 = $1 + $2"
+        DecrementStmt = "$1 = $1 - $2"
 
-    CompFilter* = tuple[colName: string, op: Comparators, value: string]
+    KeyOperatorValue* = tuple[colName: string, op: Comparators, value: string]
     KeyValueTuple* = tuple[colName, colValue: string]
 
     Syntax = ref object
@@ -37,9 +39,13 @@ type
                 selectStmt: seq[string]
             of UpdateStmt, UpdateAllStmt:
                 updateSetStmt: seq[KeyValueTuple]
+            of IncrementStmt:
+                incrementStmt: tuple[columnName: string, offset: int]
+            of DecrementStmt:
+                decrementStmt: tuple[columnName: string, offset: int]
             else: discard
 
-        whereStmt: seq[CompFilter]
+        whereStmt: seq[KeyOperatorValue]
         whereLikeStmt: seq[tuple[colName, valueLike: string]]
         countWhere: int
 
@@ -56,9 +62,8 @@ type
     EnimsqlError = ref object of CatchableError
     DatabaseDefect = object of Defect
 
-var Model* = Models()
+var Model* = Models()       ## A singleton instance of Models object
 var modelsIdent {.compileTime.}: seq[string]
-
 
 template checkObjectIntegrity(modelIdent: typedesc[ref object]) =
     static:

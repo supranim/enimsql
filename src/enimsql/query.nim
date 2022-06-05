@@ -45,8 +45,8 @@ proc exists[M](model: ref M, id: string): ref M =
 
 proc select*[M](model: typedesc[ref M], columns: varargs[string]): ref M =
     ## Create a `SELECT` statement returning only rows with specified columns
-    runnableExamples:
-        User.select("username", "email_address").exec()
+    # runnableExamples:
+    #     User.select("username", "email_address").exec()
 
     static: checkObjectIntegrity(model)
     if columns.len != 0:
@@ -93,7 +93,7 @@ proc delete*[M](model: typedesc[ref M]): ref M =
     static: checkObjectIntegrity(model)
     result = model.initTable(DeleteStmt)
 
-proc where*[M](model: ref M, filters: varargs[CompFilter]): ref M =
+proc where*[M](model: ref M, filters: varargs[KeyOperatorValue]): ref M =
     ## Handle `WHERE` statements with filtering support.
     ## All `Comparators` are supported.
     for filter in filters:
@@ -127,6 +127,20 @@ proc whereLike*[M](model: ref M, column: string, valueLike: string): ref M =
     result.sql.whereLikeStmt.add (column, valueLike)
     inc result.sql.countWhere
 
+proc increment*[M](model: typedesc[ref M], column: string, offset = 1): ref M =
+    ## Increment the int value of a given column
+    static: checkObjectIntegrity(model)
+    checkModelColumns($model, column)
+    result = model.initTable(IncrementStmt)
+    result.sql.incrementStmt = (column, offset)
+
+proc decrement*[M](model: typedesc[ref M], column: string, offset = 1): ref M =
+    ## Decrement the int value of a given column
+    static: checkObjectIntegrity(model)
+    checkModelColumns($model, column)
+    result = model.initTable(DecrementStmt)
+    result.sql.decrementStmt = (column, offset)
+
 proc exec*[M](model: ref M): string =
     ## Execute the current SQL statement
     var syntax: string
@@ -152,6 +166,14 @@ proc exec*[M](model: ref M): string =
             add syntax, indent(escapeValue model.sql.updateSetStmt[i].colValue, 1)
             if i != updateStmtLen:
                 add syntax, ","
+    of IncrementStmt:
+        syntax = $UpdateStmt
+        add syntax, indent("SET", 1)
+        add syntax, indent($IncrementStmt % [model.sql.incrementStmt.columnName, $model.sql.incrementStmt.offset], 1)
+    of DecrementStmt:
+        syntax = $UpdateStmt
+        add syntax, indent("SET", 1)
+        add syntax, indent($DecrementStmt % [model.sql.incrementStmt.columnName, $model.sql.incrementStmt.offset], 1)
     else: discard
 
     if model.sql.whereStmt.len != 0:
@@ -175,7 +197,6 @@ proc exec*[M](model: ref M): string =
             raise newException(DatabaseDefect,
                 "Missing \"WHERE\" statement. Use `updateAll` procedure for updating all records in the table.")
     echo syntax
-    # result = $(toJson(model))
     model.sql.countWhere = 0
 
 include ./model

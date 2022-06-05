@@ -10,3 +10,6 @@ srcDir        = "src"
 # Dependencies
 
 requires "nim >= 1.4.8"
+
+task docgen, "Generate API documentation":
+    exec "nim doc --project --index:on --outdir:htmldocs src/enimsql.nim"

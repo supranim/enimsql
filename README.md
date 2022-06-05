@@ -30,7 +30,29 @@ model "User":
 ```
 
 ## Queries
+- Select Statements
 - Where Clauses
+- Update Statements
+
+### Select Statements
+You may not always want to select all columns from a database table. Using the `select` proc, you can create a custom `SELECT` clause by specifying
+column names you want to include in your results. `select` proc is accept a parameter of type `varargs[string]`.
+
+```nim
+# Retrieve all records from `users` table and return only `name`, `email` and `country`
+User.select("name", "email", "country").exec()
+```
+
+The `selectDistinct` proc allows you to force the query to return distinct results.
+```nim
+User.selectDistinct()
+```
+
+If you already have a query builder instance and you wish to add a column to its existing `SELECT` clause, you may use the `addSelect` proc:
+```nim
+var query = User.select("name")
+let users = query.addSelect("email").exec()
+```
 
 ### Where Clause(s) 
 You may use the query builder's `where` proc to add `WHERE` clauses to the query.
@@ -42,13 +64,19 @@ The most basic call to the `where` proc requires a `varargs` of `KeyOperatorValu
 User.select().where(("email", EQ, "john.doe@example.com"))
 ```
 
-When chaining together calls to the query builder's `where` method, the `WHERE` clauses will be joined together using the `AND`
-operator. Alternatively, since `where` proc accepts a `varargs` of `KeyOperatorValue` tuple, you can call `where` proc once providing `KeyOperatorValue` tuple multiple times.
+When chaining together calls to the query builder's `where` procedure, the `WHERE` clauses will be joined together using the `AND`
+operator. Alternatively, since `where` proc accepts a `varargs` of `KeyOperatorValue` tuple, you can call `where` procedure and provide multiple `KeyOperatorValue` tuple.
 ```nim
 User.select().where(
     ("email", NEQ, "john.doe@example.com"),
     ("city", EQ, "Milan")
 )
+```
+_The example above will produce the following SQL:_
+```sql
+SELECT * FROM users
+        WHERE email <> 'john.doe@example.com',
+              city = 'Milan'
 ```
 
 However, you may use the `orWhere` proc to join a clause to the query using the `OR` operator.
@@ -61,7 +89,7 @@ User.select().where(
                 ("city", EQ "Torino"))
 ```
 
-_The example above will produce the following SQL_
+_The example above will produce the following SQL:_
 ```sql
 SELECT * FROM users
          WHERE
@@ -71,49 +99,33 @@ SELECT * FROM users
             )
 ```
 
+### Where Not Clauses
+The `whereNot` and `orWhereNot` procs may be used to negate a given group of query constraints.
+For example, the following query excludes products that are on clearance or which have a price that is less than ten:
 ```nim
-import ./model/user
+User.select().whereNot()
 ```
 
-#### Select & Where
+### Update Statements
+In addition to inserting records into the database, the query builder can also update existing records using the `update` proc.
+The `update` proc is a safe way for updating records because it requires a `WHERE` clause. To update all records in a table with same values use `updateAll`.
 ```nim
-# Create a simple query selecting all columns
-# SELECT * FROM users WHERE email = 'john.doe@example.com'
-let users = await User.select().where(("email", EQ, "john.doe@example.com")).exec()
-
-# Create a query and select only `name`, and `email`
-# SELECT name, email FROM users WHERE email <> 'john.doe@example.com'
-let users = await User.select("name", "email")
-                      .where(("email", NEQ, "john.doe@example.com"))
-                      .exec()
+User.update(("email", "new.john.doe@example.com"))
+    .where(("email", EQ, "john.doe@example.com"))
+    .exec()
 ```
 
-#### Update
-Enimsql provides safe procedures for updating records. `update`, which requires to be followed by a `where` statement, and `updateAll`,
-which updates all records in a table for given `key`, `value`.
-
-```nim 
-# UPDATE users SET updated_at = 12345 WHERE email = 'john.doe@example.com'
-let updateStatus = await User.update(("updated_at", now()))
-                             .where(("email", EQ, "john.doe@example.com"))
-                             .exec()
-if updateStatus:
-    echo "Your profile has been successfully updated"
-else:
-    echo "Could not update your profile, try again"
-
-# Example using `updateAll` for updating all records
-# UPDATE users SET updated_at = 12345
-let updateStatus = await User.updateAll(("updated_at", now())).exec()
+```nim
+User.updateAll(("updated_at", now())).exec()
 ```
 
-## Collection Results
-Enimsql returns results wrapped in a Collection `Table` that contains `Model` objects representation of each row.
+### Joins
+The query builder may also be used to add `JOIN` clauses to your queries. To perform a basic `INNER JOIN`, you may use the `join` procedure on a query builder instance.
 
 ```nim
-if users.hasResults():
-    for user in users:
-        echo user.get("name")
+import ./order, ./contacts
+
+let users = User.join(Contact)
 ```
 
 # Roadmap
