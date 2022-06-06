@@ -1,3 +1,9 @@
+# A simple ORM for poets
+#
+# (c) 2021 Enimsql is released under MIT License
+#          George Lemon | Made by Humans from OpenPeep
+#          https://supranim.com   |    https://github.com/supranim/enimsql
+
 type
     Comparators* = enum
         EQ = "="
@@ -19,18 +25,81 @@ type
         ASC = "ASC"
         DESC = "DESC"
 
+    DataType* = enum
+        BigInt = "int8"
+        BigSerial = "serial18"
+        Bit = "bit"
+        BitVarying = "varbit[]"
+        Boolean = "bool"
+        Box = "box"
+        Bytea = "bytea"
+        Char = "char[]"
+        Varchar = "varchar[]"
+        Cidr = "cidr"
+        Circle = "circle"
+        Date = "date"
+        DoublePrecision = "float8"
+        Inet = "inet"
+        Int = "int"
+        Int4 = "int4"
+        Interval = "interval"
+        Json = "json"
+        Jsonb = "jsonb"
+        Line = "line"
+        Lseg = "lseg"
+        Macaddr = "macaddr"
+        Macaddr8 = "macaddr8"
+        Money = "money"
+        Numeric = "numeric"
+        Path = "path"
+        PGLsn = "pg_lsn"
+        PGSnapshot = "pg_snapshot"
+        Point = "point"
+        Polygon = "polygon"
+        Real = "float4"
+        SmallInt = "int2"
+        SmallSerial = "serial2"
+        Serial = "serial4"
+        Text = "text"
+        Time = "time[]"
+        Timezone = "timez"
+        Timestamp = "timestamp"
+        TimestampZ = "timestampz"
+        TsQuery = "tsquery"
+        TsVector = "tsvector"
+
+    Constraints* = enum
+        ## SQL constraints are used to specify rules for data in a table
+        NotNull = "NOT NULL"
+            ## Ensures that a column cannot have a NULL value
+        Unique = "Unique"
+            ## Ensures that all values in a column are different
+        PrimaryKey = "PRIMARY KEY"
+            ## A combination of a NOT NULL and UNIQUE. Uniquely identifies each row in a table
+        ForeignKey = "FOREIGN KEY"
+            ## Prevents actions that would destroy links between tables
+        Check = "CHECK"
+            ## Ensures that the values in a column satisfies a specific condition
+        Default = "DEFAULT"
+            ## Sets a default value for a column if no value is specified
+        CreateIndex = "CREATE INDEX"
+            ## Used to create and retrieve data from the database very quickly
+
     StatementType = enum
         SelectStmt = "SELECT"
         DeleteStmt = "DELETE"
         UpdateStmt = "UPDATE"
         UpdateAllStmt = "UPDATE"
+        InsertStmt = "INSERT INTO $1 ($2) VALUES ($3);"
         WhereStmt = "WHERE"
         WhereLikeStmt = "$1 LIKE '$2'"
+        WhereExistsStmt = "$1 EXISTS ($2)"
         IncrementStmt = "$1 = $1 + $2"
         DecrementStmt = "$1 = $1 - $2"
 
     KeyOperatorValue* = tuple[colName: string, op: Comparators, value: string]
     KeyValueTuple* = tuple[colName, colValue: string]
+    SqlQuery = string
 
     Syntax = ref object
         case stmtType: StatementType
@@ -39,6 +108,8 @@ type
                 selectStmt: seq[string]
             of UpdateStmt, UpdateAllStmt:
                 updateSetStmt: seq[KeyValueTuple]
+            of InsertStmt:
+                insertStmt: seq[KeyValueTuple]
             of IncrementStmt:
                 incrementStmt: tuple[columnName: string, offset: int]
             of DecrementStmt:
@@ -47,12 +118,17 @@ type
 
         whereStmt: seq[KeyOperatorValue]
         whereLikeStmt: seq[tuple[colName, valueLike: string]]
+        whereSubqueryStmt: seq[Syntax]
         countWhere: int
 
     AbstractModel* = object of RootObj
+        ## An abstract object of `RootObj` to be extended by all models
         metaTableName: string
+            # Holds the table name (lowercased and pluralized)
         metaModelName: string
+            # Holds the model name
         sql: Syntax
+            # Holds the current SQL Syntax
 
     ModelColumns = Table[string, string]
     
