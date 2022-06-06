@@ -1,3 +1,8 @@
+# A simple ORM for poets
+#
+# (c) 2021 Enimsql is released under MIT License
+#          George Lemon | Made by Humans from OpenPeep
+#          https://supranim.com   |   https://github.com/supranim/enimsql
 
 macro model*(modelId: static string, fields: untyped) =
     ## Creates a new Model and store in the `ModelRepository` table

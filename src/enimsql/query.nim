@@ -7,55 +7,26 @@
 import std/tables
 import std/macros except name
 
-import std/jsonutils
-import std/json
+# import std/jsonutils
+# import std/json
 
 from std/strutils import `%`, indent, join, toLowerAscii, endsWith, escape
 
 include ./meta
+include ./private/statements
 
-template `a%`*(str: string): untyped =
-    ## Finds any values that start with given `str`
-    var valueLike = "$1%" % [str]
-    valueLike
-
-template `%a`*(str: string): untyped =
-    ## Finds any values that end with given `str`
-    var valueLike  = "%$1" % [str]
-    valueLike
-
-template `%a%`*(str: string): untyped =
-    ## Finds any values that have given `str` in any position
-    var valueLike  = "%$1%" % [str]
-    valueLike
-
-template `-a%`*(str: string): untyped =
-    ## Finds any values that contains given `str` in the second position.
-    var valueLike  = "_$1%" % [str]
-    valueLike
-
-template `a%b`*(startStr, endStr: string): untyped =
-    ## Finds any values that start with "a" and ends with "o"
-    var valueLike  = "$1%$2" % [startStr, endStr]
-    valueLike
-
-proc exists[M](model: ref M, id: string): ref M =
-    ## Test the existence of any record in a subquery
-    static: checkObjectIntegrity(model)
-
-proc select*[M](model: typedesc[ref M], columns: varargs[string]): ref M =
+proc select*[M](model: typedesc[ref M], cols: varargs[string]): ref M =
     ## Create a `SELECT` statement returning only rows with specified columns
     # runnableExamples:
     #     User.select("username", "email_address").exec()
-
     static: checkObjectIntegrity(model)
-    if columns.len != 0:
-        checkModelColumns($model, columns)
+    if cols.len != 0:
+        checkModelColumns($model, cols)
     result = model.initTable(SelectStmt)
-    if columns.len == 0:
+    if cols.len == 0:
         result.sql.selectStmt = @["*"]
     else:
-        for col in columns:
+        for col in cols:
             # TODO validate column names
             result.sql.selectStmt.add(col)
 
@@ -75,6 +46,7 @@ proc update*[M](model: typedesc[ref M], cols: varargs[KeyValueTuple]): ref M =
     for col in cols:
         checkDuplicates(col.colName, result.metaModelName, refCol)
         result.sql.updateSetStmt.add(col)
+        refCol.add col.colName # prevent duplicates
 
 proc updateAll*[M](model: typedesc[ref M], cols: varargs[KeyValueTuple]): ref M =
     ## Update all records in a `Model` with given columns and values.
@@ -86,7 +58,19 @@ proc updateAll*[M](model: typedesc[ref M], cols: varargs[KeyValueTuple]): ref M 
     for col in cols:
         checkDuplicates(col.colName, result.metaModelName, refCol)
         result.sql.updateSetStmt.add(col)
-        refCol.add col.colName
+        refCol.add col.colName # prevent duplicates
+
+proc insert*[M](model: typedesc[ref M], cols: varargs[KeyValueTuple]): ref M =
+    ## Insert a new record in a table
+    static: checkObjectIntegrity(model)
+    if cols.len != 0:
+        checkModelColumns($model, cols)
+    result = model.initTable(InsertStmt)
+    var refCol: seq[string]
+    for col in cols:
+        checkDuplicates(col.colName, result.metaModelName, refCol)
+        result.sql.insertStmt.add(col)
+        refCol.add col.colName # prevent duplicates
 
 proc delete*[M](model: typedesc[ref M]): ref M =
     ## Delete specific records in a model.
@@ -94,38 +78,68 @@ proc delete*[M](model: typedesc[ref M]): ref M =
     result = model.initTable(DeleteStmt)
 
 proc where*[M](model: ref M, filters: varargs[KeyOperatorValue]): ref M =
-    ## Handle `WHERE` statements with filtering support.
-    ## All `Comparators` are supported.
+    ## Handle `WHERE` statements allowing `KeyOperatorValue` filters.
+    if filters.len == 0:
+        raise newException(DatabaseDefect, "Missing filters for WHERE clause")
     for filter in filters:
         model.sql.whereStmt.add filter
         inc model.sql.countWhere
     result = model
 
+proc where*[M](model: typedesc[ref M], filters: varargs[KeyOperatorValue]): ref M =
+    ## Handle `WHERE` statements allowing `KeyOperatorValue` filters.
+    ## This procedure initialize the model object. Useful if you want
+    ## to create a `SELECT *` SQL statement and want to skip calling `select()` proc.
+    static: checkObjectIntegrity(model)
+    result = model.initTable(SelectStmt)
+    result.sql.selectStmt = @["*"]
+    discard where(result, filters)
+
 proc whereIn*[M](model: ref M, column: string, values:openarray[string]): ref M =
-    ## Handle a `WHERE` statement followed by an `IN` operator
+    ## Create a `WHERE` clause by filtering results using `IN` operator
+    ## ```sql
+    ## SELECT * FROM users WHERE country IN ('Bulgaria', 'Romania', 'Hungary');
+    ## ```
     for value in values:
         model.sql.whereIn.add value
     result = model
 
+proc whereIn*[M, S](model: ref M, secModels: typedesc[ref S]): ref M =
+    echo $secModels
+
 proc whereNotIn*[M](model: ref M, column: string, values:openarray[string]): ref M =
-    ## Handle a `WHERE` statement followed by an `NOT` operator
-    ## TODO validate col name
+    ## Create a `WHERE` clause by filtering results using `NOT` operator
+    ## ```sql
+    ## SELECT * FROM users WHERE country NOT IN ('Germany', 'France', 'UK');
+    ## ```
     for value in values:
         model.sql.whereNotIn.add value
     result = model
 
 proc whereLike*[M](model: ref M, column: string, valueLike: string): ref M =
     ## `a%`       Finds any values that start with "a"
+    ##
     ## `%a`       Finds any values that end with "a"
+    ##
     ## `%or%`     Finds any values that have "or" in any position
+    ##
     ## `_r%`      Finds any values that have "r" in the second position
+    ##
     ## `a_%`      Finds any values that start with "a" and are at least 2 characters in length
+    ##
     ## `a__%`     Finds any values that start with "a" and are at least 3 characters in length
+    ##
     ## `a%o`      Finds any values that start with "a" and ends with "o"
     result = model
     checkModelColumns(result.metaModelName, column)
     result.sql.whereLikeStmt.add (column, valueLike)
     inc result.sql.countWhere
+
+proc whereExists*[M, S](model: ref M, secondModel: typedesc[ref S], cols: varargs[KeyOperatorValue]): ref M =
+    ## A subquery procedure for testing the existence of any record.
+    # if cols.len != 0:
+    #     checkModelColumns(model.metaModelName, cols)
+    result = model
 
 proc increment*[M](model: typedesc[ref M], column: string, offset = 1): ref M =
     ## Increment the int value of a given column
@@ -143,55 +157,34 @@ proc decrement*[M](model: typedesc[ref M], column: string, offset = 1): ref M =
 
 proc exec*[M](model: ref M): string =
     ## Execute the current SQL statement
-    var syntax: string
+    var syntax: SqlQuery
     case model.sql.stmtType:
-    of DeleteStmt:
-        syntax = $DeleteStmt
-        add syntax, indent("FROM", 1) & indent(model.metaTableName, 1)
-    of SelectStmt:
-        syntax = $SelectStmt
-        if model.sql.selectStmt.len == 1:
-            add syntax, indent(model.sql.selectStmt[0], 1)
-        else:
-            add syntax, indent(join(model.sql.selectStmt, ", "), 1)
-        add syntax, indent("FROM", 1) & indent(model.metaTableName, 1)
-    of UpdateStmt, UpdateAllStmt:
-        syntax = $UpdateStmt
-        add syntax, indent(model.metaTableName, 1)
-        add syntax, indent("SET", 1)
-        let updateStmtLen = model.sql.updateSetStmt.len - 1
-        for i in 0 .. updateStmtLen:
-            add syntax, indent(model.sql.updateSetStmt[i].colName, 1)
-            add syntax, indent($EQ, 1)
-            add syntax, indent(escapeValue model.sql.updateSetStmt[i].colValue, 1)
-            if i != updateStmtLen:
-                add syntax, ","
-    of IncrementStmt:
-        syntax = $UpdateStmt
-        add syntax, indent("SET", 1)
-        add syntax, indent($IncrementStmt % [model.sql.incrementStmt.columnName, $model.sql.incrementStmt.offset], 1)
-    of DecrementStmt:
-        syntax = $UpdateStmt
-        add syntax, indent("SET", 1)
-        add syntax, indent($DecrementStmt % [model.sql.incrementStmt.columnName, $model.sql.incrementStmt.offset], 1)
+    of DeleteStmt:                newDeleteStmt
+    of SelectStmt:                newSelectStmt
+    of UpdateStmt, UpdateAllStmt: newUpdateStmt
+    of InsertStmt:                newInsertStmt
+    of IncrementStmt:             newIncrementStmt
+    of DecrementStmt:             newDecrementStmt
     else: discard
 
     if model.sql.whereStmt.len != 0:
-        add syntax, indent($WhereStmt, 1)
+        syntax &= indent($WhereStmt, 1)
         for whereStmt in model.sql.whereStmt:
-            add syntax, indent(whereStmt.colName, 1)
-            add syntax, indent($whereStmt.op, 1)
-            add syntax, indent(escapeValue whereStmt.value, 1)
+            syntax &= indent(whereStmt.colName, 1)
+            syntax &= indent($whereStmt.op, 1)
+            syntax &= indent(escapeValue whereStmt.value, 1)
             if model.sql.countWhere > 1:
-                add syntax, indent($AND, 1)
+                syntax &= indent($AND, 1)
             dec model.sql.countWhere
     elif model.sql.whereLikeStmt.len != 0:
-        add syntax, indent($WhereStmt, 1)
+        syntax &= indent($WhereStmt, 1)
         for whereLike in model.sql.whereLikeStmt:
-            add syntax, indent($WhereLikeStmt % [whereLike.colName, whereLike.valueLike], 1)
+            syntax &= indent($WhereLikeStmt % [whereLike.colName, whereLike.valueLike], 1)
             if model.sql.countWhere > 1:
-                add syntax, indent($AND, 1)
+                syntax &= indent($AND, 1)
             dec model.sql.countWhere
+    elif model.sql.whereSubqueryStmt.len != 0:
+        syntax &= indent($WhereExistsStmt % [model.metaTableName], 1)
     else:
         if model.sql.stmtType == UpdateStmt:
             raise newException(DatabaseDefect,
@@ -200,3 +193,21 @@ proc exec*[M](model: ref M): string =
     model.sql.countWhere = 0
 
 include ./model
+
+proc newDatabase*[D: Models](database: D, dbName: string) =
+    ## Creates a new database
+
+proc dropDatabase*[D: Models](database: D, dbName: string) =
+    ## Drop an existing database
+
+proc newTable*[D: Models](database: D, tableName: string) =
+    ## Create a new table in a database
+
+proc dropTable*[D: Models](database: D, tableName: string) = 
+    ## Drop an existing table from a database
+
+proc alterTable*[D: Models](database: D, tableName: string) =
+    ## Modify columns in an existing table
+
+
+    
