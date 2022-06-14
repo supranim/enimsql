@@ -15,6 +15,31 @@ from std/strutils import `%`, indent, join, toLowerAscii, endsWith, escape
 include ./meta
 include ./private/statements
 
+template `a%`*(str: string): untyped =
+    ## Finds any values that start with given `str`
+    var valueLike = "$1%" % [str]
+    valueLike
+
+template `%a`*(str: string): untyped =
+    ## Finds any values that end with given `str`
+    var valueLike  = "%$1" % [str]
+    valueLike
+
+template `%a%`*(str: string): untyped =
+    ## Finds any values that have given `str` in any position
+    var valueLike  = "%$1%" % [str]
+    valueLike
+
+template `-a%`*(str: string): untyped =
+    ## Finds any values that contains given `str` in the second position.
+    var valueLike  = "_$1%" % [str]
+    valueLike
+
+template `a%b`*(startStr, endStr: string): untyped =
+    ## Finds any values that start with "a" and ends with "o"
+    var valueLike  = "$1%$2" % [startStr, endStr]
+    valueLike
+
 proc select*[M](model: typedesc[ref M], cols: varargs[string]): ref M =
     ## Create a `SELECT` statement returning only rows with specified columns
     # runnableExamples:
@@ -155,9 +180,7 @@ proc decrement*[M](model: typedesc[ref M], column: string, offset = 1): ref M =
     result = model.initTable(DecrementStmt)
     result.sql.decrementStmt = (column, offset)
 
-proc exec*[M](model: ref M): string =
-    ## Execute the current SQL statement
-    var syntax: SqlQuery
+template execSql[M](model: ref M): untyped =
     case model.sql.stmtType:
     of DeleteStmt:                newDeleteStmt
     of SelectStmt:                newSelectStmt
@@ -189,8 +212,17 @@ proc exec*[M](model: ref M): string =
         if model.sql.stmtType == UpdateStmt:
             raise newException(DatabaseDefect,
                 "Missing \"WHERE\" statement. Use `updateAll` procedure for updating all records in the table.")
-    echo syntax
     model.sql.countWhere = 0
+    syntax
+
+proc execString*[M](model: ref M): string =
+    ## Execute the current SQL statement
+    var syntax: SqlQuery
+    result = execSql(model)
+
+proc exec*[M](model: ref M): void =
+    ## Execute the current SQL statement
+    ## TODO
 
 include ./model
 
@@ -208,6 +240,4 @@ proc dropTable*[D: Models](database: D, tableName: string) =
 
 proc alterTable*[D: Models](database: D, tableName: string) =
     ## Modify columns in an existing table
-
-
     

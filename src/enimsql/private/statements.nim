@@ -4,31 +4,6 @@
 #          George Lemon | Made by Humans from OpenPeep
 #          https://supranim.com   |    https://github.com/supranim/enimsql
 
-template `a%`*(str: string): untyped =
-    ## Finds any values that start with given `str`
-    var valueLike = "$1%" % [str]
-    valueLike
-
-template `%a`*(str: string): untyped =
-    ## Finds any values that end with given `str`
-    var valueLike  = "%$1" % [str]
-    valueLike
-
-template `%a%`*(str: string): untyped =
-    ## Finds any values that have given `str` in any position
-    var valueLike  = "%$1%" % [str]
-    valueLike
-
-template `-a%`*(str: string): untyped =
-    ## Finds any values that contains given `str` in the second position.
-    var valueLike  = "_$1%" % [str]
-    valueLike
-
-template `a%b`*(startStr, endStr: string): untyped =
-    ## Finds any values that start with "a" and ends with "o"
-    var valueLike  = "$1%$2" % [startStr, endStr]
-    valueLike
-
 template newDeleteStmt() =
     syntax = $DeleteStmt
     syntax &= indent("FROM", 1) & indent(model.metaTableName, 1)
