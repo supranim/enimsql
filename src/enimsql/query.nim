@@ -215,13 +215,13 @@ template execSql[M](model: ref M): untyped =
     model.sql.countWhere = 0
     syntax
 
-proc execString*[M](model: ref M): string =
-    ## Execute the current SQL statement
+proc getRaw*[M](model: ref M): string =
+    ## Compose the SQL Query and return the stringified version of the SQL.
     var syntax: SqlQuery
     result = execSql(model)
 
-proc exec*[M](model: ref M): void =
-    ## Execute the current SQL statement
+proc exec*[M](model: ref M) =
+    ## Compose the SQL Query and execute it.
     ## TODO
 
 include ./model

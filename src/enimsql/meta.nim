@@ -178,6 +178,10 @@ proc getModelName(id: string): string =
             return modelName
     result = "$1s" % [modelName]
 
+proc getTableName*[M](model: typedesc[ref M]): string =
+    ## Return the name of the table from current Model
+    result = getModelName($model)
+
 # proc get*[M: typedesc[object]](model: M, id: string): string =
 #     result = Model.storage[id]
 
