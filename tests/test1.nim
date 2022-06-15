@@ -8,8 +8,20 @@ model "User":
     country: string
     votes: int
 
-test "Meta table Pluralization":
+test "Meta: Table name pluralization":
     assert User.getTableName() == "users"
+
+test "Meta: Object integrity -- Check for unknown column names":
+    try:
+        discard User.where(("email_address", EQ, "test@example.com")).getRaw()
+    except DatabaseDefect:
+        assert getCurrentExceptionMsg() == "Unknown column name \"email_address\" for model \"User\""
+
+# test "Meta: Object integrity -- Check duplicated column names":
+#     try:
+#         discard User.where(("email", EQ, "test@example.com"), ("email", EQ, "test@example.com")).getRaw()
+#     except DatabaseDefect:
+#         echo getCurrentExceptionMsg()
 
 test "WHERE Query 1":
     let sql = User.where(("email", EQ, "test@example.com")).getRaw()

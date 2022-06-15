@@ -135,8 +135,7 @@ type
     Models = object
         storage: Table[string, ModelColumns]
 
-    EnimsqlError = ref object of CatchableError
-    DatabaseDefect = object of Defect
+    DatabaseDefect* = object of Defect
 
 var Model* = Models()       ## A singleton instance of Models object
 var modelsIdent {.compileTime.}: seq[string]
@@ -144,19 +143,25 @@ var modelsIdent {.compileTime.}: seq[string]
 template checkObjectIntegrity(modelIdent: typedesc[ref object]) =
     static:
         if $modelIdent notin modelsIdent:
-            raise EnimsqlError(msg: "Unknown objects cannot be used as models.")
+            raise newException(DatabaseDefect, "Unknown objects cannot be used as models.")
 
 template checkModelColumns(modelIdent: string, columns:varargs[string]) =
     let modelStruct = Model.storage[modelIdent]
     for colId in columns:
         if not modelStruct.hasKey(colId):
-            raise EnimsqlError(msg: "Unknown column name \"$1\" for model \"$2\"" % [colId, modelIdent])
+            raise newException(DatabaseDefect, "Unknown column name \"$1\" for model \"$2\"" % [colId, modelIdent])
 
 template checkModelColumns(modelIdent: string, columns:varargs[KeyValueTuple]) =
     let modelStruct = Model.storage[modelIdent]
     for col in columns:
         if not modelStruct.hasKey(col.colName):
-            raise EnimsqlError(msg: "Unknown column name \"$1\" for model \"$2\"" % [col.colName, modelIdent])
+            raise newException(DatabaseDefect, "Unknown column name \"$1\" for model \"$2\"" % [col.colName, modelIdent])
+
+template checkModelColumns(modelIdent: string, columns:varargs[KeyOperatorValue]) =
+    let modelStruct = Model.storage[modelIdent]
+    for col in columns:
+        if not modelStruct.hasKey(col.colName):
+            raise newException(DatabaseDefect, "Unknown column name \"$1\" for model \"$2\"" % [col.colName, modelIdent])
 
 template checkDuplicates(colName, modelName: string, refCol: seq[string]) =
     if colName in refCol:

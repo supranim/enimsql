@@ -7,7 +7,7 @@
 macro model*(modelId: static string, fields: untyped) =
     ## Creates a new Model and store in the `ModelRepository` table
     if modelId in modelsIdent:
-        raise EnimsqlError(msg: "A model with name \"$1\" already exists." % [modelId])
+        raise newException(DatabaseDefect, "A model with name \"$1\" already exists." % [modelId])
     fields.expectKind nnkStmtList
     var metaCols: ModelColumns
     var colFields = nnkRecList.newTree()

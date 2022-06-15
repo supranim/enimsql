@@ -117,6 +117,7 @@ proc where*[M](model: typedesc[ref M], filters: varargs[KeyOperatorValue]): ref 
     ## to create a `SELECT *` SQL statement and want to skip calling `select()` proc.
     static: checkObjectIntegrity(model)
     result = model.initTable(SelectStmt)
+    checkModelColumns(result.metaModelName, filters)
     result.sql.selectStmt = @["*"]
     discard where(result, filters)
 
