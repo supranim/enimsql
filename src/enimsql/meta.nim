@@ -101,7 +101,7 @@ type
     KeyValueTuple* = tuple[colName, colValue: string]
     SqlQuery = string
 
-    Syntax = ref object
+    Syntax = object
         case stmtType: StatementType
             of DeleteStmt: discard
             of SelectStmt:
@@ -184,8 +184,7 @@ proc getModelName(id: string): string =
 proc initTable[M](model: typedesc[ref M], stmtType: StatementType): ref M =
     ## Initialize a `ref object` for current `Model`
     result = new model
-    result.sql = new Syntax
-    result.sql.stmtType = stmtType
+    result.sql = Syntax(stmtType: stmtType)
     result.metaModelName = $model
     result.metaTableName = getModelName($model)
 

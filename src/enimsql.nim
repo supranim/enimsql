@@ -6,4 +6,6 @@ when isMainModule:
         name: string
         email: string
 
-    echo User.where(("email", EQ, "georgelemon@protonmail.com")).exec()
+    let sql = User.update(("email", "new@example.com"))
+                  .where(("email", EQ, "test@example.com")).execString()
+    echo sql
