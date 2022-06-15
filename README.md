@@ -8,7 +8,7 @@
 - [x] Powered by Nim's Macros System 👑
 - [x] Async Pool with [Treeform's PG library](https://github.com/treeform/pg)
 - [x] Built-in Validation using String-based Filters
-- [x] Pluralize Model names for SQLs
+- [x] Pluralize Models Support (English only)
 
 ## Examples
 
@@ -61,13 +61,13 @@ The most basic call to the `where` proc requires a `varargs` of `KeyOperatorValu
 2. The second argument is an operator, which can be any of the database's supported operators.
 3. The third argument is the value to compare against the column's value.
 ```nim
-User.select().where(("email", EQ, "john.doe@example.com"))
+User.where(("email", EQ, "john.doe@example.com"))
 ```
 
 When chaining together calls to the query builder's `where` procedure, the `WHERE` clauses will be joined together using the `AND`
 operator. Alternatively, since `where` proc accepts a `varargs` of `KeyOperatorValue` tuple, you can call `where` procedure and provide multiple `KeyOperatorValue` tuple.
 ```nim
-User.select().where(
+User.where(
     ("email", NEQ, "john.doe@example.com"),
     ("city", EQ, "Milan")
 )
@@ -81,12 +81,12 @@ SELECT * FROM users
 
 However, you may use the `orWhere` proc to join a clause to the query using the `OR` operator.
 ```nim
-User.select().where(
-                ("email", NEQ, "john.doe@example.com"),
-                ("city", EQ, "Milan"))
-             .orWhere(
-                ("email", NEQ, "john.doe@example.com"),
-                ("city", EQ "Torino"))
+User.where(
+        ("email", NEQ, "john.doe@example.com"),
+        ("city", EQ, "Milan"))
+     .orWhere(
+        ("email", NEQ, "john.doe@example.com"),
+        ("city", EQ "Torino"))
 ```
 
 _The example above will produce the following SQL:_
@@ -103,7 +103,7 @@ SELECT * FROM users
 The `whereNot` and `orWhereNot` procs may be used to negate a given group of query constraints.
 For example, the following query excludes products that are on clearance or which have a price that is less than ten:
 ```nim
-User.select().whereNot()
+User.whereNot()
 ```
 
 ### Update Statements
