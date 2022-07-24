@@ -33,7 +33,7 @@ template newInsertStmt() =
     for entry in model.sql.insertStmt:
         insertCols.add entry.colName
         insertValues.add escapeValue entry.colValue
-    syntax = $InsertStmt % [model.metaTableName, join(insertCols, ", "), join(insertValues)]
+    syntax = $InsertStmt % [model.metaTableName, join(insertCols, ", "), join(insertValues, ", ")]
 
 template newIncrementStmt() =
     syntax = $UpdateStmt
