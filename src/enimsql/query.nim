@@ -1,19 +1,21 @@
 # A simple ORM for poets
 #
 # (c) 2021 Enimsql is released under MIT License
-#          George Lemon | Made by Humans from OpenPeep
-#          https://supranim.com   |    https://github.com/supranim/enimsql
+#          Made by Humans from OpenPeep
+#          https://supranim.com
 
-import std/tables
+import std/asyncdispatch
 import std/macros except name
 
-# import std/jsonutils
-# import std/json
+from std/strutils import `%`, indent, join
+from ./database import Database, exec, sql, close, rows
 
-from std/strutils import `%`, indent, join, toLowerAscii, endsWith, escape
+import ./collection
 
 include ./meta
 include ./private/statements
+
+export collection, asyncdispatch
 
 template `a%`*(str: string): untyped =
     ## Finds any values that start with given `str`
@@ -221,9 +223,12 @@ proc getRaw*[M](model: ref M): string =
     var syntax: SqlQuery
     result = execSql(model)
 
-proc exec*[M](model: ref M) =
-    ## Compose the SQL Query and execute it.
-    ## TODO
+proc get*[M](model: ref M): Future[Collection] {.async.} =
+    ## Executes the query from given model and returns a
+    ## `Collection` table with available results.
+    # exec(Database, sql(model.getRaw()))
+    result = await rows(Database, model.getRaw())
+    close Database
 
 include ./model
 

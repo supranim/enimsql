@@ -3,6 +3,8 @@
 # (c) 2021 Enimsql is released under MIT License
 #          George Lemon | Made by Humans from OpenPeep
 #          https://supranim.com   |    https://github.com/supranim/enimsql
+import std/tables
+from std/strutils import `%`, toLowerAscii, endsWith, escape
 
 type
     Comparators* = enum
@@ -85,7 +87,7 @@ type
         CreateIndex = "CREATE INDEX"
             ## Used to create and retrieve data from the database very quickly
 
-    StatementType = enum
+    StatementType* = enum
         SelectStmt = "SELECT"
         DeleteStmt = "DELETE"
         UpdateStmt = "UPDATE"
@@ -99,7 +101,7 @@ type
 
     KeyOperatorValue* = tuple[colName: string, op: Comparators, value: string]
     KeyValueTuple* = tuple[colName, colValue: string]
-    SqlQuery = string
+    SqlQuery* = string
 
     Syntax = object
         case stmtType: StatementType
@@ -130,7 +132,7 @@ type
         sql: Syntax
             # Holds the current SQL Syntax
 
-    ModelColumns = Table[string, string]
+    ModelColumns* = Table[string, string]
     
     Models = object
         storage: Table[string, ModelColumns]
@@ -138,32 +140,32 @@ type
     DatabaseDefect* = object of Defect
 
 var Model* = Models()       ## A singleton instance of Models object
-var modelsIdent {.compileTime.}: seq[string]
+var modelsIdent* {.compileTime.}: seq[string]
 
-template checkObjectIntegrity(modelIdent: typedesc[ref object]) =
+template checkObjectIntegrity*(modelIdent: typedesc[ref object]) =
     static:
         if $modelIdent notin modelsIdent:
             raise newException(DatabaseDefect, "Unknown objects cannot be used as models.")
 
-template checkModelColumns(modelIdent: string, columns:varargs[string]) =
+template checkModelColumns*(modelIdent: string, columns:varargs[string]) =
     let modelStruct = Model.storage[modelIdent]
     for colId in columns:
         if not modelStruct.hasKey(colId):
             raise newException(DatabaseDefect, "Unknown column name \"$1\" for model \"$2\"" % [colId, modelIdent])
 
-template checkModelColumns(modelIdent: string, columns:varargs[KeyValueTuple]) =
+template checkModelColumns*(modelIdent: string, columns:varargs[KeyValueTuple]) =
     let modelStruct = Model.storage[modelIdent]
     for col in columns:
         if not modelStruct.hasKey(col.colName):
             raise newException(DatabaseDefect, "Unknown column name \"$1\" for model \"$2\"" % [col.colName, modelIdent])
 
-template checkModelColumns(modelIdent: string, columns:varargs[KeyOperatorValue]) =
+template checkModelColumns*(modelIdent: string, columns:varargs[KeyOperatorValue]) =
     let modelStruct = Model.storage[modelIdent]
     for col in columns:
         if not modelStruct.hasKey(col.colName):
             raise newException(DatabaseDefect, "Unknown column name \"$1\" for model \"$2\"" % [col.colName, modelIdent])
 
-template checkDuplicates(colName, modelName: string, refCol: seq[string]) =
+template checkDuplicates*(colName, modelName: string, refCol: seq[string]) =
     if colName in refCol:
         raise newException(DatabaseDefect,
             "Duplicated column name \"$1\" for \"$2\" model." % [colName, modelName])
