@@ -1,4 +1,4 @@
-import std/[macros, tables]
+import std/[macros, tables, envvars]
 import db_connector/db_postgres
 export db_postgres
 
@@ -56,27 +56,18 @@ macro withDB*(x: untyped): untyped =
         newEmptyNode(),
         nnkCall.newTree(
           ident"open",
-          newLit"",
-          newLit"",
-          newLit"",
-          nnkInfix.newTree(
-            ident"%",
-            newLit"host=localhost port=$1 dbname=$2",
-            nnkBracket.newTree(
-              nnkPrefix.newTree(
-                ident"$",
-                nnkPar.newTree(
-                  newDotExpr(
-                    newDotExpr(ident"DB", ident"maindb"),
-                    ident"port"
-                  )
-                )
-              ),
-              newDotExpr(
-                newDotExpr(ident"DB", ident"maindb"),
-                ident"name"
-              )
-            )
+          newLit"localhost", # todo option to use unix sockets
+          newDotExpr(
+            newDotExpr(ident"DB", ident"maindb"),
+            ident"user"
+          ),
+          newDotExpr(
+            newDotExpr(ident"DB", ident"maindb"),
+            ident"password"
+          ),
+          newDotExpr(
+            newDotExpr(ident"DB", ident"maindb"),
+            ident"name"
           )
         )
       )
