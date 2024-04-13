@@ -9,14 +9,14 @@ export Port, `$`, `%`
 
 type
   DBConnection = ref object
-    address, name, user, password: string
+    address*, name*, user*, password*: string
     port: Port
 
   DBConnections = OrderedTableRef[string, DBConnection]
   Enimsql = ref object
     ## Database manager
     dbs: DBConnections
-    maindb: DBConnection
+    maindb*: DBConnection
 
 var DB*: Enimsql
 

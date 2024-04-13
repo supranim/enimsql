@@ -124,6 +124,8 @@ when not defined release:
   proc `$`*(node: Node): string =
     result = pretty(node.toJson, 2)
 
+proc `$`*(x: SqlQuery): string = x.string
+
 proc getTableName*(id: string): string =
   add result, id[0].toLowerAscii
   for c in id[1..^1]:
@@ -137,30 +139,6 @@ proc getDefaultValue*(col: SQLColumn): string =
   ## Returns default value of `sqlv`
   if col.cDefault != nil:
     result = col.cDefault.value
-      # case col.cDefault.dt
-      # of BigInt:
-      #   $(col.cDefault.vBigInt)
-      # of BigSerial:
-      #   $(col.cDefault.vBigSerial)
-      # of Bit:
-      #   $(col.cDefault.vBit)
-      # of BitVarying:
-      #   $(col.cDefault.vBitVarying)
-      # of Box:
-      #   $(col.cDefault.vBox)
-      # of Bytea:
-      #   $(col.cDefault.vBytea)
-      # of Char:
-      #   $(col.cDefault.vChar)
-      # of Varchar:
-      #   $(col.cDefault.vVarchar)
-      # of Boolean:
-      #   $(col.cDefault.vBool)
-      # of Int:
-      #   $(col.cDefault.vInt)
-      # of Text:
-      #   "'" & $(col.cDefault.vText) & "'"
-      # else: ""
 
 proc newCreateStmt*: Node =
   result = Node(nt: ntCreate)
@@ -370,11 +348,13 @@ template checkConstraints(constr: openarray[Constraints], stmt: typed) {.dirty.}
 
 template checkModelIdent(x) {.dirty.} =
   if unlikely(models.hasKey(x)):
-    raise newException(EnimsqlModelDefect, "Duplicate model `" & x & "`")
+    raise newException(EnimsqlModelDefect,
+      "Duplicate model `" & x & "`")
 
 template checkModelExists(x) {.dirty.} =
   if unlikely(not models.hasKey(x)):
-    raise newException(EnimsqlModelDefect, "Unknown model `" & x & "`")
+    raise newException(EnimsqlModelDefect,
+      "Unknown model `" & x & "`")
 
 proc create*(models: SchemaTable,
     modelName: string, callbackBuilder: SchemaBuilder): SQLQuery =
