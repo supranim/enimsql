@@ -281,7 +281,7 @@ macro initTable*(model: untyped) =
   checkModelExists(model)
   result = newStmtList()
   let table = getTableName($model)
-  var createStmt: Node = newCreateStmt()
+  var createStmt: Query = newCreateStmt()
   var cols: seq[SQLColumn]
   for col in model.columns():
     add createStmt.createColumns, col
@@ -303,7 +303,7 @@ macro tryCreate*[M](model: typedesc[M], then: untyped) =
   checkModelExists(model)
   result = newStmtList()
   let table = getTableName($model)
-  var createStmt: Node = newCreateStmt()
+  var createStmt: Query = newCreateStmt()
   for col in model.columns():
     add createStmt.createColumns, col
   if createStmt.createColumns.len != 0:
@@ -329,7 +329,7 @@ macro delete*[M](model: typedesc[M]) =
   checkModelExists(model)
   result = newStmtList()
   let table = getTableName($model)
-  var dropStmt: Node = newDropStmt()
+  var dropStmt: Query = newDropStmt()
   exec sql(dropStmt, table)
 
 macro delete*(model: untyped, then: untyped) =
@@ -337,7 +337,7 @@ macro delete*(model: untyped, then: untyped) =
   checkModelExists(model)
   result = newStmtList()
   let table = getTableName($model)
-  var dropStmt: Node = newDropStmt()
+  var dropStmt: Query = newDropStmt()
   tryExec sql(dropStmt, table)
 
 template drop*(model: untyped) =
@@ -349,7 +349,7 @@ macro clear*(model: untyped, then: untyped) =
   checkModelExists(model)
   result = newStmtList()
   let table = getTableName($model)
-  var clearStmt: Node = newClearStmt()
+  var clearStmt: Query = newClearStmt()
   executeSQL sql(clearStmt, table):
     then
 
@@ -359,12 +359,12 @@ macro insert*(model: untyped, row: untyped,
   checkModelExists(model)
   result = newStmtList()
   let table = getTableName($model)
-  var insertStmt: Node = newInsertStmt()
+  var insertStmt: Query = newInsertStmt()
   for col in model.columns():
     if Constraints.pk in col.cConstraints:
       # todo support composite primary key
       insertStmt.insertReturn =
-        Node(nt: ntReturn, returnColName: col.cName)
+        Query(nt: ntReturn, returnColName: col.cName)
           # todo support aliasing
   var i = 0
   var values: seq[NimNode]
@@ -414,7 +414,7 @@ macro where*(model, stmt: untyped): untyped =
   checkModelExists(model)
   result = newStmtList()
   let table = getTableName($model)
-  var insertStmt: Node = newWhereStmt()
+  var insertStmt: Query = newWhereStmt()
   var i = 0
   var values: seq[NimNode]
   for kv in stmt:
@@ -429,9 +429,12 @@ macro where*(model, stmt: untyped): untyped =
 macro generateSQLValueHandlers(sqlv: typed) =
   result = newStmtList()
   let impl = sqlv.getImpl()
+  var caseBranches = newNimNode(nnkCaseStmt)
+  add caseBranches, ident"dt" # `case dt:`
   for f in impl[2][1..^1]:
     let procName = "newSQL" & $f[0]
     let fName = f[0]
+    # create a setter proc for each DataType field
     add result,
       newProc(
         nnkPostfix.newTree(ident"*", ident procName),
@@ -456,5 +459,37 @@ macro generateSQLValueHandlers(sqlv: typed) =
           )
         )
       )
+    # add generated proc to `newSQLValue` case branch
+    add caseBranches,
+      nnkOfBranch.newTree(
+        f[0],
+        newStmtList().add(
+          newCall(
+            ident procName,
+            ident "x" # string to DataType
+          )
+        )
+      )
+  add result,
+    newProc(
+      nnkPostfix.newTree(
+        ident"*",
+        ident"newSqlValue"
+      ),
+      params = [
+        ident"SQLValue",
+        nnkIdentDefs.newTree(
+          ident"dt",
+          ident"DataType",
+          newEmptyNode()
+        ),
+        nnkIdentDefs.newTree(
+          ident"x",
+          ident"string",
+          newEmptyNode()
+        )
+      ],
+      body = newStmtList().add(caseBranches)
+    )
 
 generateSQLValueHandlers(DataType)

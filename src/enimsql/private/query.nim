@@ -2,8 +2,8 @@ import std/[tables, macros, strutils, sequtils]
 
 from pkg/db_connector/db_postgres import SQLQuery
 
-import ./datatype
-export datatype
+import ./datatype, ../collection
+export datatype, collection
 
 type
   NodeType* = enum
@@ -48,10 +48,6 @@ type
     ASC = "ASC"
     DESC = "DESC"
 
-  SQLValue* = ref object
-    dt*: DataType
-    value*: string
-
   SQLColumn* = ref object
     cName*: string
     cType*: DataType
@@ -75,23 +71,27 @@ type
 
   # KeyOpValue* = tuple[colName, op: SQLOperator, colValue: Value]
   # KeyValue* = tuple[colName: string, colValue: Value]
-
-  Node* = ref object
+  QueryBuilder* = (Model, Query)
+  Query* = ref object
     case nt*: NodeType
     of ntCreate:
       createColumns*: seq[SQLColumn]
     of ntSelect:
       selectColumns*: seq[string]
       selectTable*: string
-      selectCondition*: Node # ntWhere
+      selectCondition*: Query # ntWhere
+      selectOrder*: seq[(string, Order)]
     of ntInsert, ntUpsert:
       insertFields*: OrderedTable[string, SQLValue]
-      insertReturn*: Node # ntReturn node
+      insertReturn*: Query # ntReturn node
     of ntInfix:
       infixOp: SQLOperator
       infixLeft, infixRight: string
     of ntWhere:
-      whereBranches*: seq[Node] # ntInfix
+      whereBranches*: seq[Query] # ntInfix
+    of ntUpdate, ntUpdateAll:
+      updateFields: seq[(SQLColumn, string)]
+      updateCondition*: Query
     of ntDrop:
       discard
     of ntTruncate:
@@ -106,12 +106,12 @@ type
   ]
 
   SchemaTable* = OrderedTableRef[string, Model]
+
   AbstractModel* = ref object of RootObj
     modelName: string
 
   Schema* = OrderedTableRef[string, SQLColumn]
   SchemaBuilder* = proc(m: Schema)
-
   EnimsqlModelDefect* = object of CatchableError
   EnimsqlQueryDefect* = object of CatchableError
 
@@ -121,7 +121,7 @@ var Models* = SchemaTable()
 when not defined release:
   import std/[json, jsonutils]
 
-  proc `$`*(node: Node): string =
+  proc `$`*(node: Query): string =
     result = pretty(node.toJson, 2)
 
 proc `$`*(x: SqlQuery): string = x.string
@@ -140,29 +140,18 @@ proc getDefaultValue*(col: SQLColumn): string =
   if col.cDefault != nil:
     result = col.cDefault.value
 
-proc newCreateStmt*: Node =
-  result = Node(nt: ntCreate)
+proc newCreateStmt*: Query  = Query(nt: ntCreate)
+proc newDropStmt*:   Query  = Query(nt: ntDrop)
+proc newClearStmt*:  Query  = Query(nt: ntTruncate)
+proc newInsertStmt*: Query  = Query(nt: ntInsert)
+proc newUpsertStmt*: Query  = Query(nt: ntUpsert)
+proc newWhereStmt*:  Query  = Query(nt: ntWhere)
+proc newSelectStmt*: Query  = Query(nt: ntSelect)
+proc newUpdateStmt*: Query  = Query(nt: ntUpdate)
+proc newUpdateAllStmt*: Query  = Query(nt: ntUpdateAll)
 
-proc newDropStmt*: Node =
-  result = Node(nt: ntDrop)
-
-proc newClearStmt*: Node =
-  result = Node(nt: ntTruncate)
-
-proc newInsertStmt*: Node =
-  result = Node(nt: ntInsert)
-
-proc newUpsertStmt*: Node =
-  result = Node(nt: ntUpsert)
-
-proc newWhereStmt*: Node =
-  result = Node(nt: ntWhere)
-
-proc newSelectStmt*: Node =
-  result = Node(nt: ntSelect)
-
-proc newInfixExpr*(lhs, rhs: string, op: SQLOperator): Node =
-  result = Node(nt: ntInfix)
+proc newInfixExpr*(lhs, rhs: string, op: SQLOperator): Query =
+  result = Query(nt: ntInfix)
   result.infixLeft = lhs
   result.infixRight= rhs
   result.infixOp = op
@@ -198,6 +187,9 @@ var
     "select": "SELECT",
     "insert": "INSERT INTO $1",
     "where": "WHERE",
+    "update": "UPDATE $1 ",
+    "set": "SET $1",
+    "orderby": "ORDER BY $1",
     "returning": "RETURNING $1"
   }.toTable
   stmtSqlite {.compileTime.} = {
@@ -207,6 +199,9 @@ var
     "select": "SELECT",
     "insert": "INSERT INTO $1",
     "where": "WHERE",
+    "update": "UPDATE $1 ",
+    "set": "SET $1",
+    "orderby": "ORDER BY $1;",
     "returning": "" # todo
   }.toTable
 
@@ -222,8 +217,8 @@ proc q*(key: string): string {.compileTime.} =
       else:
         stmtSqlite[key]
 
-proc sql*(node: Node, k: string): string =
-  ## Transform given SQL Node to stringified SQL
+proc sql*(node: Query, k: string): string =
+  ## Transform given SQL Query to stringified SQL
   case node.nt:
   of ntCreate:
     var fields: seq[string]
@@ -245,10 +240,6 @@ proc sql*(node: Node, k: string): string =
         add fields, field
       elif col.cConstraints.len > 0:
         var field = col.cName & indent($col.cType, 1)
-        # echo col.cName
-        # echo col.colDataTypeArg.repr
-        # if col.colDataTypeArg.kind != nnkNilLit:
-        #   field = field % [$(col.colDataTypeArg)]
         for constr in col.cConstraints:
           case constr
           of Constraints.default:
@@ -276,6 +267,9 @@ proc sql*(node: Node, k: string): string =
     add result, indent(node.selectTable, 1)
     if node.selectCondition != nil:
       add result, sql(node.selectCondition, k)
+    if node.selectOrder.len > 0:
+      add result, indent(q("orderby") %
+        join(node.selectOrder.mapIt(it[0] & indent($(it[1]), 1)), ","), 1)
   of ntWhere:
     for branch in node.whereBranches:
       add result, q("where").indent(1)
@@ -283,29 +277,46 @@ proc sql*(node: Node, k: string): string =
       when nimvm:
         val = 
           case StaticSchema[k].tColumns[branch.infixLeft].cType
-          of Text, Varchar, Char:
-            "'" & branch.infixRight & "'"
-          else:
+          of Boolean, Int, Numeric, Money, Serial:
             branch.infixRight
+          else:
+            "'" & branch.infixRight & "'"
       else:
         val = 
           case Models[k].tColumns[branch.infixLeft].cType
-          of Text, Varchar, Char:
-            "'" & branch.infixRight & "'"
-          else:
+          of Boolean, Int, Numeric, Money, Serial:
             branch.infixRight
+          else:
+            "'" & branch.infixRight & "'"
       add result, indent(branch.infixLeft, 1)
       add result, indent($branch.infixOp, 1)
       add result, indent(val, 1)
+  of ntUpdate, ntUpdateAll:
+    result = q("update") % k
+    var updates: seq[string]
+    for f in node.updateFields:
+      var val =
+        case f[0].cType
+        of Boolean, Int, Numeric, Money, Serial:
+          f[1]
+        else:
+          "'" & f[1] & "'"
+      add updates, f[0].cName & " = " & val
+    add result, q("set") % updates.join(", ")
+    case node.nt
+    of ntUpdate:
+      if likely(node.updateCondition != nil):
+        add result, sql(node.updateCondition, k)
+    else: discard # ntUpdateAll
   of ntDrop:
-    result = q("drop") % [k]
+    result = q("drop") % k
   of ntTruncate:
     if node.truncateColumns.len == 0:
       result = q("truncate") % [indent("", 1), k]
     else:
       result = q("truncate") % [node.truncateColumns.join(",").indent(1), k]
   of ntInsert, ntUpsert:
-    result = q("insert") % [k]
+    result = q("insert") % k
     var i = 0
     let total =
       if node.insertFields.len == 0: 0
@@ -361,7 +372,7 @@ proc create*(models: SchemaTable,
   checkModelIdent(modelName)
   var schemaTable = Schema()
   callbackBuilder(schemaTable)
-  var createStmt: Node = newCreateStmt()
+  var createStmt: Query = newCreateStmt()
   let tableName = modelName.getTableName
   for k, col in schemaTable:
     add createStmt.createColumns, col
@@ -435,49 +446,131 @@ proc table*(models: SchemaTable, modelName: string): Model =
   checkModelExists(modelName)
   return models[modelName]
 
-proc select*(model: Model, cols: varargs[string]): (Model, Node) =
-  var selectStmt = newSelectStmt()
-  add selectStmt.selectTable, model.tName
+template checkColumn(k: string, stmt) =
+  if likely(result[0].tColumns.hasKey(k)):
+    stmt
+  else:
+    raise newException(EnimsqlQueryDefect,
+      "Column `" & k & "` does not exist")
+
+proc select*(model: Model, cols: varargs[string]): QueryBuilder =
+  result = (model, newSelectStmt())
+  add result[1].selectTable, model.tName
   for col in cols:
-    if likely(model.tColumns.hasKey(col)):
+    checkColumn col:
       if unlikely(col == "*"):
         raise newException(EnimsqlModelDefect,
           "Invalid `*` selector. Leave `cols` empty for selecting all columns")
-      add selectStmt.selectColumns, col
-    else:
-      raise newException(EnimsqlQueryDefect, "Column `" & col & "` does not exist")
-  return (model, selectStmt)
+      add result[1].selectColumns, col
 
-proc where*(model: (Model, Node), key: string,
-    op: SQLOperator, val: string): (Model, Node) =
-  var whereStmt = newWhereStmt()
-  if likely(model[0].tColumns.hasKey(key)):
+proc where*(q: QueryBuilder, key: string,
+    op: SQLOperator, val: string): QueryBuilder {.discardable.} =
+  ## Use `where` proc to add "WHERE" clauses to the query
+  result = q
+  checkColumn key:
+    var whereStmt = newWhereStmt()
     add whereStmt.whereBranches, newInfixExpr(key, val, op)
-    model[1].selectCondition = whereStmt
-    result = model
-  else:
-    raise newException(EnimsqlQueryDefect, "Column `" & key & "` does not exist")
+    case q[1].nt
+    of ntSelect:
+      q[1].selectCondition = whereStmt
+    of ntUpdate:
+      q[1].updateCondition = whereStmt
+    else: 
+      raise newException(EnimsqlQueryDefect,
+        "Invalid use of where statement for " & $q[1].nt)
 
-template getAll*(model: (Model, Node)): untyped =
-  var rows = dbcon.getAllRows(SQLQuery(sql(model[1], model[0].tName)))
-  rows
+proc where*(q: QueryBuilder, key, val: string): QueryBuilder {.discardable.} =
+  result = q.where(key, EQ, val)
+
+proc orWhere*(q: QueryBuilder, handle: proc(q: QueryBuilder)): QueryBuilder =
+  ## Use the `orWhere` proc to join a clause to the
+  ## query using the `or` operator
+  handle(q)
+  result = q
+
+proc update*(model: Model,
+    pairs: varargs[(string, string)]): QueryBuilder =
+  result = (model, newUpdateStmt())
+  ## The `update` should be used to update existing
+  ## records. This proc requires a `where` statement
+  for pair in pairs:
+    checkColumn pair[0]:
+      add result[1].updateFields, (result[0].tColumns[pair[0]], pair[1])
+
+proc update*(model: Model, key, val: string): QueryBuilder =
+  result = (model, newUpdateStmt())
+  ## The `update` should be used to update existing
+  ## records. This proc requires a `where` statement
+  checkColumn key:
+    add result[1].updateFields, (result[0].tColumns[key], val)
+
+proc updateAll*(model: Model,
+    pairs: varargs[(string, string)]): QueryBuilder =
+  ## Create an `UPDATE` query to update all existing records
+  result = (model, newUpdateAllStmt())
+  for pair in pairs:
+    checkColumn pair[0]:
+      add result[1].updateFields, (result[0].tColumns[pair[0]], pair[1])
+
+proc orderBy*(q: QueryBuilder, key: string, order: Order = Order.ASC): QueryBuilder =
+  ## Add `orderBy` clause to the current `QueryBuilder`
+  assert q[1].nt == ntSelect
+  result = q
+  checkColumn key:
+    add q[1].selectOrder, (key, order)
+
+template getAll*(q: QueryBuilder): untyped =
+  ## Execute the query and returns a `Collection`
+  ## instance with the available results
+  var rows = getAllRows(dbcon,
+    SQLQuery(sql(q[1], q[0].tName)))
+  var results = initCollection[SQLValue]()
+  if rows.len > 0:
+    if q[1].selectColumns.len > 0:
+      for row in rows:
+        var e = Entry[SQLValue]()
+        for i in 0..row.high:
+          e[q[1].selectColumns[i]] = newSQLText(row[i])
+        add results, e
+    else:
+      let keys = q[0].tColumns.keys.toSeq()
+      for row in rows:
+        var e = Entry[SQLValue]()
+        for i in 0..row.high:
+          e[keys[i]] = newSqlValue(q[0].tColumns[keys[i]].cType, row[i])
+        add results, e
+  results
 
 macro initModel*(T: typedesc, x: seq[string]): untyped =
   var callNode = ident("new" & $T)
-  # echo callNode.repr
   result = newStmtList()
   add result, quote do:
     `callNode`(`x`)
 
-template getAll*(model: (Model, Node), T: typedesc): untyped =
-  let results = dbcon.getAllRows(SQLQuery(sql(model[1], model[0].tName)))
+template getAll*(q: QueryBuilder, T: typedesc): untyped =
+  ## Execute the query and returns a collection of objects `T`.
+  ## This works only for a `Model` defined at compile-time
+  let results = getAllRows(dbcon,
+    SQLQuery(sql(q[1], q[0].tName)))
   var collections: seq[T]
   for res in results:
     add collections, initModel(T, res)
   collections
 
+template exec*(q: QueryBuilder): untyped =
+  ## Use it inside a `withDB` context to execute a query
+  case q[1].nt
+  of ntUpdate:
+    assert q[1].updateCondition != nil
+  else: discard # todo other final checks before executing the query
+  dbcon.exec(SQLQuery sql(q[1], q[0].tName))
+
 template exec*(q: SQLQuery): untyped =
+  ## Use it inside a `withDB` context to
+  ## execute a query
   dbcon.exec(q)
 
 template tryExec*(q: SQLQuery): untyped =
+  ## Use it inside a `withDB` context to
+  ## try execute a query
   dbcon.tryExec(q)

@@ -1,4 +1,4 @@
-import std/[macros, tables, envvars]
+import std/[macros, tables]
 import db_connector/db_postgres
 export db_postgres
 

@@ -1,4 +1,8 @@
 type
+  SQLValue* = ref object
+    dt*: DataType
+    value*: string
+    
   DataType* = enum
     BigInt = "int8"
     BigSerial = "serial18"

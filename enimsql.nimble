@@ -12,6 +12,4 @@ srcDir        = "src"
 requires "nim >= 1.6.12"
 requires "db_connector"
 requires "flatty"
-
-task dev, "Build a dev version":
-  exec "nim --mm:arc --out:bin/enimsql --hints:off --threads:off c src/enimsql.nim"
+requires "jsony"
