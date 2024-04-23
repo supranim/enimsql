@@ -562,7 +562,7 @@ macro initModel*(T: typedesc, x: seq[string]): untyped =
   add result, quote do:
     `callNode`(`x`)
 
-macro toValues*(x: untyped): untyped =
+macro `@`*(x: untyped): untyped =
   ## Convert expression to pairs of `column_key: some value`
   ## This macro is similar with `%*` from `std/json`
   case x.kind
@@ -601,6 +601,13 @@ template exec*(q: QueryBuilder): untyped =
   of ntInsert:
     dbcon.exec(SQLQuery sql(q[1], q[0].tName), q[1].insertFields.values.toSeq)
   else: discard # todo other final checks before executing the query
+
+template execGet*(q: QueryBuilder, pk = "id"): untyped =
+  ## Use it inside a `withDB` context to execute an `INSERT` query.
+  ## Use a different `pk` name if your primary key is not named `id`.
+  assert q[1].nt == ntInsert
+  dbcon.tryInsert(SQLQuery sql(q[1], q[0].tName), pk,
+    q[1].insertFields.values.toSeq)
 
 template exec*(q: SQLQuery): untyped =
   ## Use it inside a `withDB` context to execute a query
