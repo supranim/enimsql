@@ -353,7 +353,7 @@ macro clear*(model: untyped, then: untyped) =
   executeSQL sql(clearStmt, table):
     then
 
-macro insert*(model: untyped, row: untyped,
+macro insertRow*(model: untyped, row: untyped,
     then, err: untyped = nil) =
   ## Insert a new row in a table
   checkModelExists(model)
@@ -374,7 +374,8 @@ macro insert*(model: untyped, row: untyped,
     if not model.checkColumn($kv[0]):
       raise newException(EnimsqlModelDefect,
         "Unknown column `" & $row[i][0] & "` (Model: " & $model & ")")
-    insertStmt.insertFields[$kv[0]] = newValue(kv[1], model.getColumn($kv[0]).cType)
+    # insertStmt.insertFields[$kv[0]] = newValue(kv[1], model.getColumn($kv[0]).cType)
+    insertStmt.insertFields[$kv[0]] = kv[1].strVal
     add values, kv[1]
   var
     callExec = newCall(ident"tryInsertID", ident"dbcon")

@@ -82,7 +82,7 @@ type
       selectCondition*: Query # ntWhere
       selectOrder*: seq[(string, Order)]
     of ntInsert, ntUpsert:
-      insertFields*: OrderedTable[string, SQLValue]
+      insertFields*: OrderedTable[string, string]
       insertReturn*: Query # ntReturn node
     of ntInfix:
       infixOp: SQLOperator
@@ -512,6 +512,21 @@ proc updateAll*(model: Model,
     checkColumn pair[0]:
       add result[1].updateFields, (result[0].tColumns[pair[0]], pair[1])
 
+proc insert*(model: Model, pairs: varargs[(string, string)]): QueryBuilder =
+  ## Create an `INSERT` statement
+  result = (model, newInsertStmt())
+  for pair in pairs:
+    checkColumn pair[0]:
+      result[1].insertFields[pair[0]] = pair[1]
+
+proc insert*(model: Model, entry: OrderedTable[string, string]): QueryBuilder =
+  ## Create an `INSERT` statement
+  result = (model, newInsertStmt())
+  for k, v in entry:
+    checkColumn k:
+      discard
+  result[1].insertFields = entry
+
 proc orderBy*(q: QueryBuilder, key: string, order: Order = Order.ASC): QueryBuilder =
   ## Add `orderBy` clause to the current `QueryBuilder`
   assert q[1].nt == ntSelect
@@ -547,6 +562,26 @@ macro initModel*(T: typedesc, x: seq[string]): untyped =
   add result, quote do:
     `callNode`(`x`)
 
+macro `%*`*(x: untyped): untyped =
+  ## Convert expression to pairs of `column_key: some value`
+  ## This macro is similar with `%*` from `std/json`
+  case x.kind
+  of nnkTableConstr:
+    var x = x
+    for i in 0..<x.len:
+      x[i].expectKind nnkExprColonExpr
+      case x[i][1].kind
+      of nnkIntLit:
+        x[i][1] = newLit($(x[i][1].intVal))
+      of nnkFloatLit:
+        x[i][1] = newLit($(x[i][1].floatVal))
+      of nnkIdent:
+        if x[i][1].eqIdent"true" or x[i][1].eqIdent "false":
+          x[i][1] = newLit(parseBool(x[i][1].strVal))
+      else: discard
+    return newCall(ident"toOrderedTable", x)
+  else: error("Invalid expression, expected curly braces")
+
 template getAll*(q: QueryBuilder, T: typedesc): untyped =
   ## Execute the query and returns a collection of objects `T`.
   ## This works only for a `Model` defined at compile-time
@@ -562,15 +597,15 @@ template exec*(q: QueryBuilder): untyped =
   case q[1].nt
   of ntUpdate:
     assert q[1].updateCondition != nil
+    dbcon.exec(SQLQuery sql(q[1], q[0].tName))
+  of ntInsert:
+    dbcon.exec(SQLQuery sql(q[1], q[0].tName), q[1].insertFields.values.toSeq)
   else: discard # todo other final checks before executing the query
-  dbcon.exec(SQLQuery sql(q[1], q[0].tName))
 
 template exec*(q: SQLQuery): untyped =
-  ## Use it inside a `withDB` context to
-  ## execute a query
+  ## Use it inside a `withDB` context to execute a query
   dbcon.exec(q)
 
 template tryExec*(q: SQLQuery): untyped =
-  ## Use it inside a `withDB` context to
-  ## try execute a query
+  ## Use it inside a `withDB` context to try execute a query
   dbcon.tryExec(q)
