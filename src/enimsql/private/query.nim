@@ -562,7 +562,7 @@ macro initModel*(T: typedesc, x: seq[string]): untyped =
   add result, quote do:
     `callNode`(`x`)
 
-macro `%*`*(x: untyped): untyped =
+macro toValues*(x: untyped): untyped =
   ## Convert expression to pairs of `column_key: some value`
   ## This macro is similar with `%*` from `std/json`
   case x.kind
