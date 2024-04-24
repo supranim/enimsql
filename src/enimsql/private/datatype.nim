@@ -43,6 +43,6 @@ type
     Timezone = "timez"
     Timestamp = "timestamp"
       ## https://www.postgresql.org/docs/current/datatype-datetime.html
-    TimestampZ = "timestampz"
+    TimestampTz = "timestamptz"
     TsQuery = "tsquery"
     TsVector = "tsvector"
