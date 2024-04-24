@@ -577,7 +577,7 @@ macro `@`*(x: untyped): untyped =
         x[i][1] = newLit($(x[i][1].floatVal))
       of nnkIdent:
         if x[i][1].eqIdent"true" or x[i][1].eqIdent "false":
-          x[i][1] = newLit(parseBool(x[i][1].strVal))
+          x[i][1] = newLit(x[i][1].strVal)
       else: discard
     return newCall(ident"toOrderedTable", x)
   else: error("Invalid expression, expected curly braces")
