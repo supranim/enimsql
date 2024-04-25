@@ -290,7 +290,8 @@ macro initTable*(model: untyped) =
     var
       execCall = newCall(ident"exec", ident"dbcon")
       sqlCall = newCall ident"sql"
-    add sqlCall, newLit sql(createStmt, table)
+    var values: seq[string]
+    add sqlCall, newLit sql(createStmt, table, values)
     add execCall, sqlCall
     add result, execCall
   else:
@@ -310,7 +311,8 @@ macro tryCreate*[M](model: typedesc[M], then: untyped) =
     var
       execCall = newCall(ident"tryExec", ident"dbcon")
       sqlCall = newCall ident"sql"
-    add sqlCall, newLit sql(createStmt, table)
+    var values: seq[string]
+    add sqlCall, newLit sql(createStmt, table, values)
     add execCall, sqlCall
     add result,
       nnkBlockStmt.newTree(
@@ -330,7 +332,8 @@ macro delete*[M](model: typedesc[M]) =
   result = newStmtList()
   let table = getTableName($model)
   var dropStmt: Query = newDropStmt()
-  exec sql(dropStmt, table)
+  var values: seq[string]
+  exec sql(dropStmt, table, values)
 
 macro delete*(model: untyped, then: untyped) =
   ## Delete a table represented by `Model`
@@ -338,7 +341,8 @@ macro delete*(model: untyped, then: untyped) =
   result = newStmtList()
   let table = getTableName($model)
   var dropStmt: Query = newDropStmt()
-  tryExec sql(dropStmt, table)
+  var values: seq[string]
+  tryExec sql(dropStmt, table, values)
 
 template drop*(model: untyped) =
   ## Delete a table represented by `Model`
@@ -350,7 +354,8 @@ macro clear*(model: untyped, then: untyped) =
   result = newStmtList()
   let table = getTableName($model)
   var clearStmt: Query = newClearStmt()
-  executeSQL sql(clearStmt, table):
+  var values: seq[string]
+  executeSQL sql(clearStmt, table, values):
     then
 
 macro insertRow*(model: untyped, row: untyped,
@@ -380,7 +385,8 @@ macro insertRow*(model: untyped, row: untyped,
   var
     callExec = newCall(ident"tryInsertID", ident"dbcon")
     callSql = newCall ident"sql"
-  add callSql, newLit sql(insertStmt, table)
+    sqlValues: seq[string]
+  add callSql, newLit sql(insertStmt, table, sqlValues)
   add callExec, callSql
   for v in values:
     add callExec, v
