@@ -19,6 +19,7 @@ type
     ntWhereLike
     ntWhereExistsStmt
     ntOr
+    ntAnd
     ntInc
     ntDec
     ntSet
@@ -94,6 +95,8 @@ type
       whereBranches*: seq[Query]   # ntInfix
     of ntOr:
       orBranches*: seq[Query] # ntInfix
+    of ntAnd:
+      andBranches*: seq[Query] # ntInfix
     of ntUpdate, ntUpdateAll:
       updateFields: seq[(SQLColumn, string)]
       updateCondition*: Query
@@ -156,7 +159,8 @@ proc newWhereStmt*:  Query  = Query(nt: ntWhere)
 proc newSelectStmt*: Query  = Query(nt: ntSelect)
 proc newUpdateStmt*: Query  = Query(nt: ntUpdate)
 proc newUpdateAllStmt*: Query  = Query(nt: ntUpdateAll)
-proc newOrStmt*: Query      = Query(nt: ntOr) 
+proc newOrStmt*: Query      = Query(nt: ntOr)
+proc newAndStmt*: Query      = Query(nt: ntAnd)
 proc newLimitFilter*(i: int): Query = Query(nt: ntLimit, limitNumber: i)
 
 proc newInfixExpr*(lhs, rhs: string, op: SQLOperator): Query =
@@ -282,36 +286,30 @@ proc sql*(node: Query, k: string, values: var seq[string]): string =
     for filter in node.selectQueryFilters:
       add result, indent(sql(filter, k, values), 1)
   of ntWhere:
+    var infixExprs, infixGroups: seq[string]
     for branch in node.whereBranches:
       case branch.nt
       of ntInfix:
-        add result, q("where").indent(1)
-        # var val: string
-        # when nimvm:
-        #   val = 
-        #     case StaticSchema[k].tColumns[branch.infixLeft].cType
-        #     of Boolean, Int, Numeric, Money, Serial:
-        #       # branch.infixRight
-        #       "'" & branch.infixRight & "'"
-        #     else:
-        #       "'" & branch.infixRight & "'"
-        # else:
-        #   val = 
-        #     case Models[k].tColumns[branch.infixLeft].cType
-        #     of Boolean, Int, Numeric, Money, Serial:
-        #       "'" & branch.infixRight & "'"
-        #     else:
-        #       "'" & branch.infixRight & "'"
-        add result, branch.infixLeft.escape.indent(1)
-        add result, indent($(branch.infixOp), 1)
-        # add result, branch.infixRight.escape(prefix = "'", suffix = "'").indent(1)
-        add result, indent("?", 1)
+        var infixExpr = branch.infixLeft.escape.indent(1)
+        add infixExpr, indent($(branch.infixOp), 1)
+        add infixExpr, indent("?", 1)
         add values, branch.infixRight
-      of ntOr:
-        add result, sql(branch, k, values)
+        add infixExprs, infixExpr
+      of ntOr, ntAnd:
+        add infixGroups, sql(branch, k, values)
       else: discard
-  of ntOr:
-    result = indent($OR, 1)
+    add result, q("where").indent(1)
+    add result, infixExprs.join(indent("AND", 1))
+  of ntOr, ntAnd:
+    var branches: seq[Query]
+    result =
+      case node.nt
+      of ntOr:
+        branches = node.orBranches
+        indent($OR, 1)
+      else:
+        branches = node.andBranches
+        indent($AND, 1)
     for branch in node.orBranches:
       case branch.nt
       of ntInfix:
@@ -320,7 +318,6 @@ proc sql*(node: Query, k: string, values: var seq[string]): string =
         add result, indent("?", 1)
         add values, branch.infixRight
       else: discard # todo
-    # add result, sql(node, k)
   of ntUpdate, ntUpdateAll:
     result = q("update") % k
     var updates: seq[string]
@@ -502,15 +499,24 @@ proc where*(q: QueryBuilder, key: string,
   ## Use `where` proc to add "WHERE" clauses to the query
   result = q
   checkColumn key:
-    var whereStmt = newWhereStmt()
-    add whereStmt.whereBranches, newInfixExpr(key, val, op)
+    let infixExpr = newInfixExpr(key, val, op)
     case q[1].nt
     of ntSelect:
-      q[1].selectCondition = whereStmt
+      if q[1].selectCondition == nil:
+        q[1].selectCondition = newWhereStmt()
+      add q[1].selectCondition.whereBranches, infixExpr
     of ntUpdate:
-      q[1].updateCondition = whereStmt
+      if q[1].updateCondition == nil:
+        q[1].updateCondition = newWhereStmt()
+      add q[1].selectCondition.whereBranches, infixExpr
     of ntOr:
-      add q[1].orBranches, whereStmt.whereBranches
+      var whereStmt = newWhereStmt()
+      add whereStmt.whereBranches, infixExpr
+      add q[1].orBranches, whereStmt
+    of ntAnd:
+      var whereStmt = newWhereStmt()
+      add whereStmt.whereBranches, infixExpr
+      add q[1].andBranches, whereStmt
     else: 
       raise newException(EnimsqlQueryDefect,
         "Invalid use of `WHERE` statement for " & $q[1].nt)
@@ -518,10 +524,23 @@ proc where*(q: QueryBuilder, key: string,
 proc where*(q: QueryBuilder, key, val: string): QueryBuilder {.discardable.} =
   result = q.where(key, EQ, val)
 
+proc where*(q: QueryBuilder, kv: varargs[(string, SQLOperator, string)]): QueryBuilder {.discardable.} =
+  for x in kv:
+    q.where(x[0], x[1], x[2])
+  result = q
+
 proc orWhere*(q: QueryBuilder, handle: proc(q: QueryBuilder)): QueryBuilder =
   ## Use the `orWhere` proc to join a clause to the
   ## query using the `or` operator
   var q2 = (q[0], newOrStmt())
+  handle(q2)
+  add q[1].selectCondition.whereBranches, q2[1]
+  result = q
+
+proc andWhere*(q: QueryBuilder, handle: proc(q: QueryBuilder)): QueryBuilder =
+  ## Use the `andWhere` proc to join a caluse to the query
+  ## using the `AND` operator
+  var q2 = (q[0], newAndStmt())
   handle(q2)
   add q[1].selectCondition.whereBranches, q2[1]
   result = q
@@ -584,8 +603,20 @@ template exists*(m: Model, colName, expectValue: string): bool =
   var values: seq[string]
   let x = m.select.where(colName, expectValue).limit(1)
   let q = sql(x[1], m.tName, values)
-  let res = dbcon.getRow(SQLQuery("SELECT EXISTS (" & q & ")"), values)
-  len(res) > 0
+  let status = dbcon.getValue(SQLQuery("SELECT EXISTS (" & q & ")"), values)
+  if status == "t": true
+  else: false
+
+template exists*(m: Model, kv: varargs[(string, string)]): bool =
+  var values: seq[string]
+  var qbuilder = m.select
+  for x in kv:
+    qbuilder.where(x[0], x[1])
+  discard qbuilder.limit(1)
+  let qstr = sql(qbuilder[1], m.tName, values)
+  let status = dbcon.getValue(SQLQuery("SELECT EXISTS (" & qstr & ")"), values)
+  if status == "t": true
+  else: false
 
 template getAll*(q: QueryBuilder): untyped =
   ## Execute the query and returns a `Collection`
@@ -616,26 +647,6 @@ macro initModel*(T: typedesc, x: seq[string]): untyped =
   add result, quote do:
     `callNode`(`x`)
 
-macro `@`*(x: untyped): untyped =
-  ## Convert expression to pairs of `column_key: some value`
-  ## This macro is similar with `%*` from `std/json`
-  case x.kind
-  of nnkTableConstr:
-    var x = x
-    for i in 0..<x.len:
-      x[i].expectKind nnkExprColonExpr
-      case x[i][1].kind
-      of nnkIntLit:
-        x[i][1] = newLit($(x[i][1].intVal))
-      of nnkFloatLit:
-        x[i][1] = newLit($(x[i][1].floatVal))
-      of nnkIdent:
-        if x[i][1].eqIdent"true" or x[i][1].eqIdent "false":
-          x[i][1] = newLit(x[i][1].strVal)
-      else: discard
-    return newCall(ident"toOrderedTable", x)
-  else: error("Invalid expression, expected curly braces")
-
 template getAll*(q: QueryBuilder, T: typedesc): untyped =
   ## Execute the query and returns a collection of objects `T`.
   ## This works only for a `Model` defined at compile-time
@@ -646,6 +657,26 @@ template getAll*(q: QueryBuilder, T: typedesc): untyped =
   for res in results:
     add collections, initModel(T, res)
   collections
+
+template get*(q: QueryBuilder): untyped =
+  var values: seq[string]
+  let x = SQLQuery(sql(q[1], q[0].tName, values))
+  var row = getRow(dbcon, x, values)
+  var results = initCollection[SQLValue]()
+  if row.len > 0:
+    if q[1].selectColumns.len > 0:
+      for i in 0..row.high:
+        var e = Entry[SQLValue]()
+        e[q[1].selectColumns[i]] = newSQLText(row[i])
+        add results, e
+    else:
+      let keys = q[0].tColumns.keys.toSeq()
+      for i in 0..row.high:
+        var e = Entry[SQLValue]()
+        e[keys[i]] = newSqlValue(q[0].tColumns[keys[i]].cType, row[i])
+        add results, e
+  results
+
 
 template exec*(q: QueryBuilder): untyped =
   ## Use it inside a `withDB` context to execute a query
