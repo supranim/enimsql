@@ -9,6 +9,7 @@ type
   NodeType* = enum
     ntCreate
     ntTruncate
+    ntDelete
     ntDrop
     ntInsert
     ntUpsert
@@ -29,6 +30,9 @@ type
     ntComp
     ntField
     ntLimit
+    ntOffset
+    ntPolicy
+    # ntCountFn
 
   SQLOperator* = enum
     EQ = "="
@@ -52,9 +56,9 @@ type
     DESC = "DESC"
 
   SQLColumn* = ref object
-    cName*: string
-    cType*: DataType
-    cTypeArgs*: seq[string]
+    columnName*: string
+    columnType*: DataType
+    columnTypeArgs*: seq[string]
     cDefault*: SQLValue
     cConstraints*: seq[Constraints]
     cReference*: Reference
@@ -75,6 +79,137 @@ type
   # KeyOpValue* = tuple[colName, op: SQLOperator, colValue: Value]
   # KeyValue* = tuple[colName: string, colValue: Value]
   QueryBuilder* = (Model, Query)
+  
+  PolicyCommandType* = enum
+    cmdTypeAll = "ALL"
+      ## Using ALL for a policy means that it will apply to
+      ## all commands, regardless of the type of command. If an ALL
+      ## policy exists and more specific policies exist, then both
+      ## the ALL policy and the more specific policy (or policies)
+      ## will be applied. Additionally, ALL policies will be applied
+      ## to both the selection side of a query and the modification side,
+      ## using the USING expression for both cases if only a USING
+      ## expression has been defined.
+      ## As an example, if an UPDATE is issued, then the ALL policy
+      ## will be applicable both to what the UPDATE will be able to select
+      ## as rows to be updated (applying the USING expression), and to
+      ## the resulting updated rows, to check if they are permitted to
+      ## be added to the table (applying the WITH CHECK expression,
+      ## if defined, and the USING expression otherwise). If an INSERT or
+      ## UPDATE command attempts to add rows to the table that do not
+      ## pass the ALL policy's WITH CHECK expression, the entire
+      ## command will be aborted.
+    cmdTypeSelect = "SELECT"
+      ## Using SELECT for a policy means that it will apply to SELECT queries
+      ## and whenever SELECT permissions are required on the relation the
+      ## policy is defined for. The result is that only those records from the
+      ## relation that pass the SELECT policy will be returned during a SELECT
+      ## query, and that queries that require SELECT permissions, such as
+      ## UPDATE, will also only see those records that are allowed by the
+      ## SELECT policy. A SELECT policy cannot have a WITH CHECK expression,
+      ## as it only applies in cases where records are being retrieved from
+      ## the relation.
+    cmdTypeInsert = "INSERT"
+      ## Using INSERT for a policy means that it will apply to INSERT commands
+      ## and MERGE commands that contain INSERT actions. Rows being inserted
+      ## that do not pass this policy will result in a policy violation error,
+      ## and the entire INSERT command will be aborted. An INSERT policy
+      ## cannot have a USING expression, as it only applies in cases where
+      ## records are being added to the relation.
+      ##
+      ## Note that INSERT with ON CONFLICT DO UPDATE checks INSERT policies'
+      ## WITH CHECK expressions only for rows appended to the relation by the
+      ## INSERT path.
+    cmdTypeUpdate = "UPDATE"
+      ## Using UPDATE for a policy means that it will apply to UPDATE, SELECT
+      ## FOR UPDATE and SELECT FOR SHARE commands, as well as auxiliary ON
+      ## CONFLICT DO UPDATE clauses of INSERT commands. MERGE commands
+      ## containing UPDATE actions are affected as well. Since UPDATE involves
+      ## pulling an existing record and replacing it with a new modified
+      ## record, UPDATE policies accept both a USING expression and a WITH
+      ## CHECK expression. The USING expression determines which records the
+      ## UPDATE command will see to operate against, while the WITH CHECK
+      ## expression defines which modified rows are allowed to be stored back
+      ## into the relation.
+      ##
+      ## Any rows whose updated values do not pass the WITH CHECK expression
+      ## will cause an error, and the entire command will be aborted. If only
+      ## a USING clause is specified, then that clause will be used for both
+      ## USING and WITH CHECK cases.
+      ##
+      ## Typically an UPDATE command also needs to read data from columns in
+      ## the relation being updated (e.g., in a WHERE clause or a RETURNING
+      ## clause, or in an expression on the right hand side of the SET
+      ## clause). In this case, SELECT rights are also required on the
+      ## relation being updated, and the appropriate SELECT or ALL policies
+      ## will be applied in addition to the UPDATE policies. Thus the user
+      ## must have access to the row(s) being updated through a SELECT or ALL
+      ## policy in addition to being granted permission to update the row
+      ## (s) via an UPDATE or ALL policy.
+      ##
+      ## When an INSERT command has an auxiliary ON CONFLICT DO UPDATE clause,
+      ## if the UPDATE path is taken, the row to be updated is first checked
+      ## against the USING expressions of any UPDATE policies, and then the
+      ## new updated row is checked against the WITH CHECK expressions. Note,
+      ## however, that unlike a standalone UPDATE command, if the existing row
+      ## does not pass the USING expressions, an error will be thrown
+      ## (the UPDATE path will never be silently avoided).
+    cmdTypeDelete = "DELETE"
+      ## Using DELETE for a policy means that it will apply to DELETE commands.
+      ## Only rows that pass this policy will be seen by a DELETE command.
+      ## There can be rows that are visible through a SELECT that are not
+      ## available for deletion, if they do not pass the USING expression for
+      ## the DELETE policy.
+      ##
+      ## In most cases a DELETE command also needs to read data from columns in
+      ## the relation that it is deleting from (e.g., in a WHERE clause or a
+      ## RETURNING clause). In this case, SELECT rights are also required on
+      ## the relation, and the appropriate SELECT or ALL policies will be
+      ## applied in addition to the DELETE policies. Thus the user must have
+      ## access to the row(s) being deleted through a SELECT or ALL policy in
+      ## addition to being granted permission to delete the row(s) via a
+      ## DELETE or ALL policy.
+
+      ## A DELETE policy cannot have a WITH CHECK expression, as it only
+      ## applies in cases where records are being deleted from the relation,
+      ## so that there is no new row to check.
+
+  PolicyType* = enum
+    policyTypePermissive = "PERMISSIVE"
+    policyTypeRestrictive = "RESTRICTIVE"
+
+  QueryPolicy* = ref object
+    ## https://www.postgresql.org/docs/current/sql-createpolicy.html
+    policyName, tableName: string
+    commandType: PolicyCommandType
+      # The command to which the policy applies.
+      # Default `cmdTypeAll`
+    roleName: string
+      # The role to which the policy is applied.
+      # Leaving this field empty creates a policy that
+      # is applied to all roles. `PUBLIC`
+    policyType: PolicyType
+      # **Permissive** policy:
+      # 
+      # Specify that the policy is to be created as a permissive
+      # policy. All permissive policies which are applicable to a
+      # given query will be combined together using the Boolean
+      # “OR” operator. By creating permissive policies,
+      # administrators can add to the set of records which can
+      # be accessed. Policies are permissive by default.
+      # 
+      #
+      # **Restrictive** policy:
+      # 
+      # All restrictive policies which are applicable to a
+      # given query will be combined together using the Boolean
+      # “AND” operator. creating restrictive policies,
+      # administrators can reduce the set of records which can
+      # be accessed as all restrictive policies must be passed
+      # for each record.
+    usingExpression, checkExpression: Query
+      # Any SQL conditional expression (returning boolean)
+
   Query* = ref object
     case nt*: NodeType
     of ntCreate:
@@ -102,12 +237,18 @@ type
       updateCondition*: Query
     of ntLimit:
       limitNumber: int
+    of ntOffset:
+      offsetNumber: int
     of ntDrop:
       discard
     of ntTruncate:
       truncateColumns*: seq[string]
+    of ntDelete:
+      deleteWhere: Query
     of ntReturn:
       returnColName*, returnColAlias*: string
+    of ntPolicy:
+      policy: QueryPolicy
     else: discard
 
   Model* = tuple[
@@ -115,17 +256,21 @@ type
     tColumns: OrderedTableRef[string, SQLColumn]
   ]
 
-  SchemaTable* = OrderedTableRef[string, Model]
+  StaticModel* = tuple[
+    tName: string,
+    tColumns: OrderedTableRef[string, SQLColumn],
+    customTypes: NimNode
+  ]
 
-  AbstractModel* = ref object of RootObj
-    modelName: string
+  SchemaTable* = OrderedTableRef[string, Model]
+  StaticSchemaTable* = OrderedTableRef[string, StaticModel]
 
   Schema* = OrderedTableRef[string, SQLColumn]
-  SchemaBuilder* = proc(m: Schema)
+  SchemaBuilder* = proc(m: Schema): void
   EnimsqlModelDefect* = object of CatchableError
   EnimsqlQueryDefect* = object of CatchableError
 
-var StaticSchema* {.compileTime.} = SchemaTable()
+var StaticSchema* {.compileTime.} = StaticSchemaTable()
 var Models* = SchemaTable()
 
 when not defined release:
@@ -154,14 +299,20 @@ proc newCreateStmt*: Query  = Query(nt: ntCreate)
 proc newDropStmt*:   Query  = Query(nt: ntDrop)
 proc newClearStmt*:  Query  = Query(nt: ntTruncate)
 proc newInsertStmt*: Query  = Query(nt: ntInsert)
+proc newDeleteStmt*: Query  = Query(nt: ntDelete)
 proc newUpsertStmt*: Query  = Query(nt: ntUpsert)
 proc newWhereStmt*:  Query  = Query(nt: ntWhere)
 proc newSelectStmt*: Query  = Query(nt: ntSelect)
 proc newUpdateStmt*: Query  = Query(nt: ntUpdate)
 proc newUpdateAllStmt*: Query  = Query(nt: ntUpdateAll)
-proc newOrStmt*: Query      = Query(nt: ntOr)
-proc newAndStmt*: Query      = Query(nt: ntAnd)
-proc newLimitFilter*(i: int): Query = Query(nt: ntLimit, limitNumber: i)
+proc newOrStmt*: Query         = Query(nt: ntOr)
+proc newAndStmt*: Query        = Query(nt: ntAnd)
+proc newLimitFilter*(i: int): Query     = Query(nt: ntLimit, limitNumber: i)
+proc newOffsetFilter*(i: int): Query    = Query(nt: ntOffset, offsetNumber: i)
+# proc newCountFn*(x: string): Query = Query(nt: ntCountFn, countColumn: x)
+
+# Runtime Models API
+# proc getModels*(m: SchemaTable):
 
 proc newInfixExpr*(lhs, rhs: string, op: SQLOperator): Query =
   result = Query(nt: ntInfix)
@@ -196,6 +347,7 @@ var
   stmtPgsql {.compileTime.} = {
     "create": "CREATE TABLE IF NOT EXISTS $1 ($2);",
     "truncate": "DELETE$1FROM $2;",
+    "remove": "DELETE FROM $1",
     "drop": "DROP TABLE IF EXISTS $1;",
     "select": "SELECT",
     "insert": "INSERT INTO $1",
@@ -205,33 +357,33 @@ var
     "orderby": "ORDER BY $1",
     "returning": "RETURNING $1"
   }.toTable
-  stmtSqlite {.compileTime.} = {
-    "create": "CREATE TABLE IF NOT EXISTS $1 ($2)",
-    "truncate": "DELETE$1FROM $2;",
-    "drop": "DROP TABLE IF EXISTS $1;",
-    "select": "SELECT",
-    "insert": "INSERT INTO $1",
-    "where": "WHERE",
-    "update": "UPDATE $1 ",
-    "set": "SET $1",
-    "orderby": "ORDER BY $1;",
-    "returning": "" # todo
-  }.toTable
+  # stmtSqlite {.compileTime.} = {
+  #   "create": "CREATE TABLE IF NOT EXISTS $1 ($2)",
+  #   "truncate": "DELETE$1FROM $2;",
+  #   "drop": "DROP TABLE IF EXISTS $1;",
+  #   "select": "SELECT",
+  #   "insert": "INSERT INTO $1",
+  #   "where": "WHERE",
+  #   "update": "UPDATE $1 ",
+  #   "set": "SET $1",
+  #   "orderby": "ORDER BY $1;",
+  #   "returning": "" # todo
+  # }.toTable
 
 proc getDriver*(): DBDriver {.compileTime.} =
   ## Retrieve default Database Driver
   driverPostgres
 
 proc q*(key: string): string {.compileTime.} =
-  result =
-    case getDriver():
-      of driverPostgres:
-        stmtPgsql[key]
-      else:
-        stmtSqlite[key]
+  result = stmtPgsql[key]
+    # case getDriver():
+    #   of driverPostgres:
+    #     stmtPgsql[key]
+    #   else:
+    #     stmtSqlite[key]
 
 proc sql*(node: Query, k: string, values: var seq[string]): string =
-  ## Transform given SQL Query to stringified SQL
+  ## Stringify Query node to SQL
   case node.nt:
   of ntCreate:
     var fields: seq[string]
@@ -240,19 +392,24 @@ proc sql*(node: Query, k: string, values: var seq[string]): string =
         # CONSTRAINT fk_author FOREIGN KEY(author_id) REFERENCES author(id)
         if Constraints.notnull in col.cConstraints:
           add fields,
-            col.cName & indent($DataType.Int, 1) & indent($(Constraints.notnull), 1)
+            col.columnName & indent($DataType.Int, 1) & indent($(Constraints.notnull), 1)
         else:
           add fields,
-            col.cName & indent($DataType.Int, 1)
+            col.columnName & indent($DataType.Int, 1)
         var field = "CONSTRAINT"
-        add field, indent("fk_" & col.cName & "_" & col.cReference.model, 1)
+        add field, indent("fk_" & col.columnName & "_" & col.cReference.model, 1)
         add field, indent($(col.cConstraints[0]), 1)
-        add field, "(" & col.cName & ")"
+        add field, "(" & col.columnName & ")"
         add field, indent("REFERENCES", 1)
         add field, indent(col.cReference.model & "(" & col.cReference.colName & ")", 1)
         add fields, field
       elif col.cConstraints.len > 0:
-        var field = col.cName & indent($col.cType, 1)
+        var field =
+          if col.columnType == Enum:
+            # enum's ident name at index 0
+            col.columnName & indent(col.columnTypeArgs[0], 1)
+          else:
+            col.columnName & indent($col.columnType, 1)
         for constr in col.cConstraints:
           case constr
           of Constraints.default:
@@ -263,10 +420,10 @@ proc sql*(node: Query, k: string, values: var seq[string]): string =
             add field, indent($(constr), 1)
         add fields, field
       else:
-        var colNameType = col.cName & indent($col.cType, 1)
-        if col.cType in {Varchar, Char}:
+        var colNameType = col.columnName & indent($col.columnType, 1)
+        if col.columnType in {Varchar, Char}:
           add colNameType, "("
-          add colNameType, col.cTypeArgs.join(",")
+          add colNameType, col.columnTypeArgs.join(",")
           add colNameType, ")"
         add fields, colNameType
     result = q("create") % [k, fields.join(", ")]
@@ -299,42 +456,44 @@ proc sql*(node: Query, k: string, values: var seq[string]): string =
         add infixGroups, sql(branch, k, values)
       else: discard
     add result, q("where").indent(1)
-    add result, infixExprs.join(indent("AND", 1))
+    if infixExprs.len > 0:
+      add result, infixExprs.join(indent("AND", 1))
+    if infixGroups.len > 0:
+      add result, infixGroups.join(" ")
   of ntOr, ntAnd:
     var branches: seq[Query]
     result =
-      case node.nt
-      of ntOr:
+      if node.nt == ntOr:
         branches = node.orBranches
         indent($OR, 1)
       else:
         branches = node.andBranches
         indent($AND, 1)
-    for branch in node.orBranches:
-      case branch.nt
-      of ntInfix:
-        add result, indent(branch.infixLeft.escape, 1)
-        add result, indent($branch.infixOp, 1)
-        add result, indent("?", 1)
-        add values, branch.infixRight
-      else: discard # todo
+    for branch in branches:
+      for b in branch.whereBranches:
+        case b.nt
+        of ntInfix:
+          add result, indent(b.infixLeft.escape, 1)
+          add result, indent($b.infixOp, 1)
+          add result, indent("?", 1)
+          add values, b.infixRight
+        else: discard # todo
+  of ntDelete:
+    add result, q("remove") % k
+    if node.deleteWhere != nil:
+      add result, sql(node.deleteWhere, k, values)
   of ntUpdate, ntUpdateAll:
     result = q("update") % k
     var updates: seq[string]
     for f in node.updateFields:
-      var val =
-        case f[0].cType
-        of Boolean, Int, Numeric, Money, Serial:
-          f[1]
-        else:
-          "'" & f[1] & "'"
-      add updates, f[0].cName & " = " & val
+      add values, f[1]
+      add updates, f[0].columnName & " = ?"
     add result, q("set") % updates.join(", ")
     case node.nt
     of ntUpdate:
       if likely(node.updateCondition != nil):
         add result, sql(node.updateCondition, k, values)
-    else: discard # ntUpdateAll
+    else: discard # todo ntUpdateAll
   of ntDrop:
     result = q("drop") % k
   of ntTruncate:
@@ -372,8 +531,12 @@ proc sql*(node: Query, k: string, values: var seq[string]): string =
       # add result, sql(node.insertReturn, k)
   of ntLimit:
     result = indent("LIMIT " & $(node.limitNumber), 1)
+  of ntOffset:
+    result = indent("OFFSET " & $(node.offsetNumber), 1)
   of ntReturn:
     result = indent(q("returning") % [node.returnColName], 1)
+  # of ntCountFn:
+    # result = indent("COUNT($1)" % [node.countColumn], 1)
   else: discard
 
 
@@ -415,8 +578,8 @@ proc add*(schema: Schema, name: string,
     coltype = DataType.Text): SQLColumn {.discardable.} =
   ## Add a new field to a runtime Model 
   if likely(not schema.hasKey(name)):
-    result = SQLColumn(cName: name)
-    result.ctype = coltype
+    result = SQLColumn(columnName: name)
+    result.columnType = coltype
     schema[name] = result
   else:
     raise newException(EnimsqlModelDefect,
@@ -450,15 +613,15 @@ proc pk*(col: SQLColumn): SQLColumn {.discardable.} =
 proc default*(col: SQLColumn, value: SQLValue): SQLColumn {.discardable.} =
   ## Set a default `SQLValue`
   if likely(col.cDefault == nil):
-    if col.cType == value.dt:
+    if col.columnType == value.dt:
       col.cDefault = value
       add col.cConstraints, Constraints.default
       return col
     else:
       raise newException(EnimsqlModelDefect,
-        "Type mismatch `" & col.cName & "` is type of `" & $(col.cType) & "`. Got `" & $(value.dt) & "`")
+        "Type mismatch `" & col.columnName & "` is type of `" & $(col.columnType) & "`. Got `" & $(value.dt) & "`")
   raise newException(EnimsqlModelDefect,
-    "Column `" & col.cName & "` already has a DEFAULT bound to it")
+    "Column `" & col.columnName & "` already has a DEFAULT bound to it")
 
 proc null*[S: SQLColumn](col: S): S {.discardable.} =
   checkConstraints [Constraints.nullable, Constraints.notnull]:
@@ -508,7 +671,7 @@ proc where*(q: QueryBuilder, key: string,
     of ntUpdate:
       if q[1].updateCondition == nil:
         q[1].updateCondition = newWhereStmt()
-      add q[1].selectCondition.whereBranches, infixExpr
+      add q[1].updateCondition.whereBranches, infixExpr
     of ntOr:
       var whereStmt = newWhereStmt()
       add whereStmt.whereBranches, infixExpr
@@ -517,6 +680,10 @@ proc where*(q: QueryBuilder, key: string,
       var whereStmt = newWhereStmt()
       add whereStmt.whereBranches, infixExpr
       add q[1].andBranches, whereStmt
+    of ntDelete:
+      var whereStmt = newWhereStmt()
+      add whereStmt.whereBranches, infixExpr
+      q[1].deleteWhere = whereStmt
     else: 
       raise newException(EnimsqlQueryDefect,
         "Invalid use of `WHERE` statement for " & $q[1].nt)
@@ -584,6 +751,10 @@ proc insert*(model: Model, entry: OrderedTable[string, string]): QueryBuilder =
       discard
   result[1].insertFields = entry
 
+proc remove*(model: Model): QueryBuilder =
+  ## Create a `DELETE` statement.
+  result = (model, newDeleteStmt())
+
 proc orderBy*(q: QueryBuilder, key: string, order: Order = Order.ASC): QueryBuilder =
   ## Add `orderBy` clause to the current `QueryBuilder`
   assert q[1].nt == ntSelect
@@ -592,8 +763,26 @@ proc orderBy*(q: QueryBuilder, key: string, order: Order = Order.ASC): QueryBuil
     add q[1].selectOrder, (key, order)
 
 proc limit*(q: QueryBuilder, i: int): QueryBuilder =
-  ## Add a `LIMIT` filter to current `QueryBuilder`
+  ## Add a `LIMIT` filter
+  assert q[1].nt == ntSelect
   add q[1].selectQueryFilters, newLimitFilter(i)
+  result = q
+
+proc offset*(q: QueryBuilder, i: int): QueryBuilder = 
+  ## Add a `OFFSET` filter
+  assert q[1].nt == ntSelect
+  add q[1].selectQueryFilters, newOffsetFilter(i)
+  result = q
+
+proc count*(q: QueryBuilder, columnName: string = "*"): QueryBuilder =
+  ## Add a `count` function to the current `QueryBuilder`
+  assert q[1].nt == ntSelect
+  if q[1].selectColumns.len > 1:
+    q[1].selectColumns =
+      # replace previous select statements
+      @["COUNT(" & columnName & ")"]
+  else:
+    add q[1].selectColumns, "COUNT(" & columnName & ")"
   result = q
 
 template exists*(m: Model, colName, expectValue: string): bool =
@@ -637,7 +826,7 @@ template getAll*(q: QueryBuilder): untyped =
       for row in rows:
         var e = Entry[SQLValue]()
         for i in 0..row.high:
-          e[keys[i]] = newSqlValue(q[0].tColumns[keys[i]].cType, row[i])
+          e[keys[i]] = newSqlValue(q[0].tColumns[keys[i]].columnType, row[i])
         add results, e
   results
 
@@ -664,19 +853,17 @@ template get*(q: QueryBuilder): untyped =
   var row = getRow(dbcon, x, values)
   var results = initCollection[SQLValue]()
   if row.len > 0:
+    var e = Entry[SQLValue]()
     if q[1].selectColumns.len > 0:
       for i in 0..row.high:
-        var e = Entry[SQLValue]()
         e[q[1].selectColumns[i]] = newSQLText(row[i])
-        add results, e
+      add results, e
     else:
       let keys = q[0].tColumns.keys.toSeq()
       for i in 0..row.high:
-        var e = Entry[SQLValue]()
-        e[keys[i]] = newSqlValue(q[0].tColumns[keys[i]].cType, row[i])
-        add results, e
+        e[keys[i]] = newSqlValue(q[0].tColumns[keys[i]].columnType, row[i])
+      add results, e
   results
-
 
 template exec*(q: QueryBuilder): untyped =
   ## Use it inside a `withDB` context to execute a query
@@ -692,18 +879,33 @@ template exec*(q: QueryBuilder): untyped =
   else: discard # todo other final checks before executing the query
 
 template execGet*(q: QueryBuilder, pk = "id"): untyped =
-  ## Use it inside a `withDB` context to execute an `INSERT` query.
-  ## Use a different `pk` name if your primary key is not named `id`.
+  ## Use it inside a `withDB` context to execute `INSERT` or `DELETE` queries.
+  ## This returns an `int64` that represents either 
+  ## - the `pk` of the inserted query
+  ## - number of the affected rows in case of a `DELETE` query.
   var values: seq[string]
-  assert q[1].nt == ntInsert
-  dbcon.tryInsert(
-    SQLQuery(sql(q[1], q[0].tName, values)), pk,
-    q[1].insertFields.values.toSeq)
+  case q[1].nt
+  of ntInsert:
+    let somequery = SQLQuery(sql(q[1], q[0].tName, values))
+    dbcon.tryInsert(somequery, pk, q[1].insertFields.values.toSeq)
+  of ntDelete:
+    assert q[1].deleteWhere != nil
+    let somequery = SQLQuery(sql(q[1], q[0].tName, values))
+    dbcon.execAffectedRows(somequery, values)
+  else: 
+    0 # todo
 
 template exec*(q: SQLQuery): untyped =
   ## Use it inside a `withDB` context to execute a query
   dbcon.exec(q)
 
-template tryExec*(q: SQLQuery): untyped =
-  ## Use it inside a `withDB` context to try execute a query
-  dbcon.tryExec(q)
+# template tryExec*(q: QueryBuilder): untyped =
+#   ## Use it inside a `withDB` context to try execute a query
+#   var x: SqlQuery
+#   var values: seq[string]
+#   case q[1].nt
+#   of ntDelete:
+#     assert q[1].deleteWhere != nil
+#     x = SQLQuery(sql(q[1], q[0].tName, values))
+#   else: discard
+#   dbcon.tryExec(x, values)

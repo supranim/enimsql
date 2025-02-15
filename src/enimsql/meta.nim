@@ -5,7 +5,7 @@ export db_postgres
 from std/net import Port, `$`
 from std/strutils import `%`
 
-export Port, `$`, `%`
+export Port, strVal, `%`
 
 type
   DBConnection = ref object
@@ -13,9 +13,13 @@ type
     port: Port
 
   DBConnections = OrderedTableRef[string, DBConnection]
+
+  AbstractModel* = ref object of RootObj
+    modelName*: string
+
   Enimsql = ref object
-    ## Database manager
     dbs: DBConnections
+      ## holds multiple Database Connections
     maindb*: DBConnection
 
 var DB*: Enimsql
@@ -25,8 +29,12 @@ proc initDBManager*(address, name, user,
   ## Initialize a thread var database connection
   ## using `credentials` as main database
   new(DB)
-  DB.maindb = DBConnection(address: address,
-    name: name, user: user, password: password, port: port)
+  DB.maindb =
+    DBConnection(
+      address: address,
+      name: name, user: user,
+      password: password, port: port
+    )
 
 proc initdb*(name, user, password: string,
   address = "localhost", port = Port(5432)) =

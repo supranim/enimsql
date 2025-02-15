@@ -1,16 +1,18 @@
 import std/[macros, tables, strutils,
   sequtils, enumutils, macrocache]
 
+import ./meta
 import ./private/query
 export query
 
 from pkg/db_connector/db_postgres import SQLQuery, sql
 export sql
 
-when not defined release:
-  import std/[json, jsonutils]
-  proc `$`*(model: AbstractModel): string =
-    pretty(model.toJson(), 2)
+# when not defined release:
+#   import std/[json, jsonutils]
+
+#   proc `$`*(model: AbstractModel): string =
+#     pretty(model.toJson(), 2)
 
 #
 # Compile-time API
@@ -20,11 +22,13 @@ when not defined release:
 proc checkModelExists*(id: NimNode) {.compileTime.}
 proc checkColumn*(model: NimNode, name: string): bool {.compileTime.}
 
-proc newSQLColumn(n: NimNode, colName: string, pragmas: NimNode = nil): SQLColumn {.compileTime.} =
+proc newSQLColumn(n: NimNode; colName: string;
+    customTypes: var NimNode; pragmas: NimNode = nil
+  ): SQLColumn {.compileTime.} =
   ## Compile-time procedure for converting `NimTypeKind` to Enimsql `DataType`
   # https://nim-lang.org/docs/macros.html#NimTypeKind
   # https://www.postgresql.org/docs/current/datatype.html
-  result = SQLColumn(cName: colName)
+  result = SQLColumn(columnName: colName)
   if n.kind == nnkDotExpr:
     checkModelExists(n[0])
     if n[0].checkColumn($n[1]):
@@ -34,36 +38,46 @@ proc newSQLColumn(n: NimNode, colName: string, pragmas: NimNode = nil): SQLColum
     else:
       error("Unknown column `" & $n[1] & "` (Model: " & $n[0] & ")", n[1])
   else:
-    if n.kind notin {nnkIdent, nnkCall, nnkAsgn}:
+    if n.kind notin {nnkIdent, nnkCall, nnkSym, nnkAsgn}:
       raise newException(EnimsqlModelDefect,
         "Cannot convert `NimTypeKind` to `DataType`: $1" % [$n.kind])
-    var
-      nimType: NimTypeKind
-      dataTypeIdent: string
+    var datatypeId: string
     try:
       case n.kind
       of nnkIdent:
-        dataTypeIdent = n.strVal.toLowerAscii
-        result.cType = parseEnum[DataType](dataTypeIdent)
+        datatypeId = n.strVal.toLowerAscii
+        result.columnType = parseEnum[DataType](datatypeId)
       of nnkCall:
-        dataTypeIdent = n[0].strVal.toLowerAscii
-        result.cType = parseEnum[DataType](dataTypeIdent)
-        case n[1].kind
-        of nnkIntLit:
-          add result.cTypeArgs, $(n[1].intVal)
-        of nnkStrLit:
-          add result.cTypeArgs, n[1].strVal
-        else: discard # todo
+        datatypeId = n[0].strVal.toLowerAscii
+        result.columnType = parseEnum[DataType](datatypeId)
+        if result.columnType == Enum:
+          var enumfields = n[1..^1].mapit("''" & it.strVal & "''").join(",")
+          let enumname = "custom_type_" & colName
+          const createEnumType = """
+          do ' begin
+            if not exists(select 1 from pg_type where typname = ''$1'') then
+              create type $1 as enum ($2);
+            end if;
+          end ';"""
+          add customTypes, newLit(createEnumType % [`enumname`, enumfields])
+          add result.columnTypeArgs, enumname
+        else:
+          case n[1].kind
+          of nnkIntLit:
+            add result.columnTypeArgs, $(n[1].intVal)
+          of nnkStrLit:
+            add result.columnTypeArgs, n[1].strVal
+          else: discard # todo
       of nnkAsgn:
         # define columns with a `DEFAULT` value
-        dataTypeIdent = n[0].strVal.toLowerAscii
-        result.cType = parseEnum[DataType](dataTypeIdent)
-        result.cDefault = newValue(n[1], result.cType)
+        datatypeId = n[0].strVal.toLowerAscii
+        result.columnType = parseEnum[DataType](datatypeId)
+        result.cDefault = newValue(n[1], result.columnType)
         add result.cConstraints, Constraints.default
       else: discard
     except ValueError:
       raise newException(EnimsqlModelDefect,
-        "Unknown DataType: $1" % [dataTypeIdent])
+        "Unknown DataType: $1" % [datatypeId])
   for p in pragmas:
     for f in Constraints:
       if f.symbolName == p.strVal:
@@ -73,13 +87,17 @@ proc newSQLColumn(n: NimNode, colName: string, pragmas: NimNode = nil): SQLColum
 let attemptAccessNil {.compileTime.} = "Attempt to access field `$1` of a nil model"
 
 macro newModel*(id, fields: untyped) =
-  if StaticSchema.hasKey(id.strVal):
+  let id = 
+    if id.kind == nnkPragmaExpr: id[0]
+    else: id
+  if StaticSchema.hasKey($(id)):
     raise newException(EnimsqlModelDefect, "Model \"$1\" already exists." % [id.strVal])
   expectKind fields, nnkStmtList
   result = newStmtList()
   var
-    objFieldDefs = newNimNode nnkIdentDefs
+    objFieldDefs = newNimNode(nnkIdentDefs)
     staticSchemaTable = newOrderedTable[string, SQLColumn]()
+    customTypes = newNimNode(nnkBracket)
   for f in fields:
     case f.kind
     of nnkCall:
@@ -87,17 +105,20 @@ macro newModel*(id, fields: untyped) =
       of nnkIdent:
         expectKind f[1], nnkStmtList
         add objFieldDefs, f[0]
-        # add objFieldDefs, nnkPostfix.newTree(ident"*", f[0])
-        staticSchemaTable[f[0].strVal] = newSQLColumn(f[1][0], $f[0])
+        staticSchemaTable[$(f[0])] = newSQLColumn(f[1][0], $f[0], customTypes = customTypes)
       of nnkPragmaExpr:
-        # add objFieldDefs, nnkPostfix.newTree(ident"*", f[0][0])
-        add objFieldDefs, f[0][0]
-        staticSchemaTable[f[0][0].strVal] = newSQLColumn(f[1][0], $f[0][0], f[0][1])
+        var id: NimNode
+        if f[0][0].kind == nnKident:
+          id = f[0][0]
+        elif f[0][0].kind == nnkAccQuoted:
+          id = f[0][0][0]
+        add objFieldDefs, id
+        staticSchemaTable[$id] = newSQLColumn(f[1][0], $id, customTypes, f[0][1])
       else: discard
     else: discard
   add objFieldDefs, ident"SQLValue"
   add objFieldDefs, newEmptyNode()
-  var runtimeObjFields = newNimNode nnkRecList
+  var runtimeObjFields = newNimNode(nnkRecList)
   add runtimeObjFields, objFieldDefs
   add result,
     nnkTypeSection.newTree(
@@ -118,7 +139,7 @@ macro newModel*(id, fields: untyped) =
   # read-only procs for each of them
   for colId in runtimeObjFields[0][0..^3]:
     var i = 0
-    var procName: string
+    var handleColname: string
     let colName = colId.strVal
     while i <= colName.high:
       case colName[i]
@@ -129,14 +150,14 @@ macro newModel*(id, fields: untyped) =
           of '_':
             inc i
           else: break
-        add procName, colName[i].toUpperAscii
+        add handleColname, colName[i].toUpperAscii
       else:
-        add procName, colName[i]
+        add handleColname, colName[i]
       inc i
-    procName = "get" & capitalizeAscii(procName)
+    handleColname = "get" & capitalizeAscii(handleColname)
     add result,
       newProc(
-        nnkPostfix.newTree(ident"*", ident(procName)),
+        nnkPostfix.newTree(ident"*", ident(handleColname)),
         params = [
           ident"SQLValue",
           nnkIdentDefs.newTree(ident"m", id, newEmptyNode())
@@ -158,7 +179,7 @@ macro newModel*(id, fields: untyped) =
           mfield
         ),
         newCall(
-          ident("newSQL" & symbolName(staticSchemaTable[mfield.strVal].cType)),
+          ident("newSQL" & symbolName(staticSchemaTable[mfield.strVal].columnType)),
           nnkBracketExpr.newTree(
             ident"x",
             newLit(i)
@@ -184,17 +205,23 @@ macro newModel*(id, fields: untyped) =
     )
 
   let table = getTableName(id.strVal)
-  StaticSchema[id.strVal] = (table, staticSchemaTable)
-  let id = genSym(nskVar, "schema")
+  StaticSchema[id.strVal] = (table, staticSchemaTable, customTypes)
+  let schemaIdent = genSym(nskVar, "schema")
   add result, quote do:
-    var `id` = Schema()
+    var `schemaIdent` = Schema()
   for k, v in staticSchemaTable:
     add result, quote do:
       block:
-        `id`[`k`] = `v`
+        `schemaIdent`[`k`] = `v`
   add result, quote do:
     block:
-      Models[`table`] = (`table`, `id`)
+      Models[`table`] = (`table`, `schemaIdent`)
+
+macro createPolicy*[M](model: typedesc[M], policyName: untyped, stmt: untyped) =
+  ## Create a new policy on a specific model. Note that `M` model
+  ## must be marked with `{.rls.}` pragma if is defined
+  ## at compile-time via `newModel` macro.
+  echo stmt.treeRepr
 
 # const beforeActionTable = CacheTable"BeforeActionTable"
 # template before*(body: untyped) =
@@ -291,6 +318,15 @@ macro initTable*(model: untyped) =
       execCall = newCall(ident"exec", ident"dbcon")
       sqlCall = newCall ident"sql"
     var values: seq[string]
+    if not StaticSchema[$model][2].isNil:
+      # check if there are any custom types
+      # defined before creating the table
+      for customType in StaticSchema[$model][2]:
+        add result, newCall(
+          ident"exec",
+          ident"dbcon",
+          newCall(ident"sql", newLit(customType.strVal & ";"))
+        )
     add sqlCall, newLit sql(createStmt, table, values)
     add execCall, sqlCall
     add result, execCall
@@ -369,7 +405,7 @@ macro insertRow*(model: untyped, row: untyped,
     if Constraints.pk in col.cConstraints:
       # todo support composite primary key
       insertStmt.insertReturn =
-        Query(nt: ntReturn, returnColName: col.cName)
+        Query(nt: ntReturn, returnColName: col.columnName)
           # todo support aliasing
   var i = 0
   var values: seq[NimNode]
@@ -379,7 +415,7 @@ macro insertRow*(model: untyped, row: untyped,
     if not model.checkColumn($kv[0]):
       raise newException(EnimsqlModelDefect,
         "Unknown column `" & $row[i][0] & "` (Model: " & $model & ")")
-    # insertStmt.insertFields[$kv[0]] = newValue(kv[1], model.getColumn($kv[0]).cType)
+    # insertStmt.insertFields[$kv[0]] = newValue(kv[1], model.getColumn($kv[0]).columnType)
     insertStmt.insertFields[$kv[0]] = kv[1].strVal
     add values, kv[1]
   var
@@ -439,12 +475,12 @@ macro generateSQLValueHandlers(sqlv: typed) =
   var caseBranches = newNimNode(nnkCaseStmt)
   add caseBranches, ident"dt" # `case dt:`
   for f in impl[2][1..^1]:
-    let procName = "newSQL" & $f[0]
+    let procolumnName = "newSQL" & $f[0]
     let fName = f[0]
     # create a setter proc for each DataType field
     add result,
       newProc(
-        nnkPostfix.newTree(ident"*", ident procName),
+        nnkPostfix.newTree(ident"*", ident procolumnName),
         params = [
           ident "SQLValue",
           nnkIdentDefs.newTree(
@@ -472,7 +508,7 @@ macro generateSQLValueHandlers(sqlv: typed) =
         f[0],
         newStmtList().add(
           newCall(
-            ident procName,
+            ident procolumnName,
             ident "x" # string to DataType
           )
         )

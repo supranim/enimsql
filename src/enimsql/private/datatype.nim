@@ -46,3 +46,14 @@ type
     TimestampTz = "timestamptz"
     TsQuery = "tsquery"
     TsVector = "tsvector"
+    Uuid = "uuid"
+    Enum = "enum"
+
+# Postgresql Functions
+# const pgsqlFunctions = {
+#   "UUID": [
+#     "uuid_generate_v1",
+#     "uuid_generate_v1mc",
+#     "uuid_generate_v4",
+#   ]
+# }
