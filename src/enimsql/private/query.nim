@@ -17,6 +17,7 @@ type
     ntUpdate
     ntUpdateAll
     ntWhere
+    ntWhereIn
     ntWhereLike
     ntWhereExistsStmt
     ntOr
@@ -228,6 +229,9 @@ type
       infixLeft, infixRight: string
     of ntWhere:
       whereBranches*: seq[Query]   # ntInfix
+    of ntWhereIn:
+      whereInField: string
+      whereInBranches: seq[string] # where in (x, y, z)
     of ntOr:
       orBranches*: seq[Query] # ntInfix
     of ntAnd:
@@ -302,6 +306,7 @@ proc newInsertStmt*: Query  = Query(nt: ntInsert)
 proc newDeleteStmt*: Query  = Query(nt: ntDelete)
 proc newUpsertStmt*: Query  = Query(nt: ntUpsert)
 proc newWhereStmt*:  Query  = Query(nt: ntWhere)
+proc newWhereInStmt*: Query = Query(nt: ntWhereIn)
 proc newSelectStmt*: Query  = Query(nt: ntSelect)
 proc newUpdateStmt*: Query  = Query(nt: ntUpdate)
 proc newUpdateAllStmt*: Query  = Query(nt: ntUpdateAll)
@@ -352,6 +357,7 @@ var
     "select": "SELECT",
     "insert": "INSERT INTO $1",
     "where": "WHERE",
+    "whereIn": "WHERE $1 in ($2)",
     "update": "UPDATE $1 ",
     "set": "SET $1",
     "orderby": "ORDER BY $1",
@@ -460,6 +466,14 @@ proc sql*(node: Query, k: string, values: var seq[string]): string =
       add result, infixExprs.join(indent("AND", 1))
     if infixGroups.len > 0:
       add result, infixGroups.join(" ")
+  of ntWhereIn:
+    var x: string
+    for branch in node.whereInBranches:
+      add x, "?"
+      add values, branch
+    add result, (q("whereIn").indent(1) % [
+      node.whereInField, x.join(",")
+    ])
   of ntOr, ntAnd:
     var branches: seq[Query]
     result =
@@ -695,6 +709,18 @@ proc where*(q: QueryBuilder, kv: varargs[(string, SQLOperator, string)]): QueryB
   for x in kv:
     q.where(x[0], x[1], x[2])
   result = q
+
+proc whereIn*(q: QueryBuilder, key: string, vals: seq[string]): QueryBuilder {.discardable.} =
+  result = q
+  checkColumn key:
+    case q[1].nt
+    of ntSelect:
+      q[1].selectCondition = newWhereInStmt()
+      q[1].selectCondition.whereInField = key
+      q[1].selectCondition.whereInBranches = vals
+    else: 
+      raise newException(EnimsqlQueryDefect,
+        "Invalid use of `WHERE` statement for " & $q[1].nt)
 
 proc orWhere*(q: QueryBuilder, handle: proc(q: QueryBuilder)): QueryBuilder =
   ## Use the `orWhere` proc to join a clause to the

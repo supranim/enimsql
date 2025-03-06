@@ -6,7 +6,7 @@ import pkg/jsony
 type
   Entry*[T] = OrderedTable[string, T]
   Collection*[T] = ref object
-    entries: seq[Entry[T]]
+    entries*: seq[Entry[T]]
 
 proc initCollection*[T]: Collection[T] =
   new(result)
