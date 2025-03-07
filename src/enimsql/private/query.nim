@@ -837,23 +837,15 @@ template getAll*(q: QueryBuilder): untyped =
   ## Execute the query and returns a `Collection`
   ## instance with the available results
   var values: seq[string]
-  let x = SQLQuery(sql(q[1], q[0].tName, values))
-  var rows = getAllRows(dbcon, x, values)
-  var results = initCollection[SQLValue]()
-  if rows.len > 0:
-    if q[1].selectColumns.len > 0:
-      for row in rows:
-        var e = Entry[SQLValue]()
-        for i in 0..row.high:
-          e[q[1].selectColumns[i]] = newSQLText(row[i])
-        add results, e
-    else:
-      let keys = q[0].tColumns.keys.toSeq()
-      for row in rows:
-        var e = Entry[SQLValue]()
-        for i in 0..row.high:
-          e[keys[i]] = newSqlValue(q[0].tColumns[keys[i]].columnType, row[i])
-        add results, e
+  let sqlQuery = SQLQuery(sql(q[1], q[0].tName, values))
+  var
+    cols: DBColumns = @[]
+    results = initCollection[SQLValue]()
+  for x in instantRows(dbcon, cols, sqlQuery, values):
+    var entry = Entry[SQLValue]()
+    for id, col in cols:
+      entry[col.name] = newSqlValue(q[0].tColumns[col.name].columnType, x[id])
+    add results, entry
   results
 
 macro initModel*(T: typedesc, x: seq[string]): untyped =
